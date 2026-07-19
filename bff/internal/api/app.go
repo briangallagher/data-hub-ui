@@ -1,0 +1,275 @@
+package api
+
+import (
+	"context"
+	"crypto/x509"
+	"fmt"
+	"io"
+	"log/slog"
+	"net/http"
+	"os"
+	"path"
+	"strings"
+
+	"github.com/opendatahub-io/mod-arch-library/bff/internal/integrations/bffclient"
+	"github.com/opendatahub-io/mod-arch-library/bff/internal/integrations/bffclient/bffmocks"
+	k8s "github.com/opendatahub-io/mod-arch-library/bff/internal/integrations/kubernetes"
+	k8mocks "github.com/opendatahub-io/mod-arch-library/bff/internal/integrations/kubernetes/k8mocks"
+	"k8s.io/client-go/kubernetes"
+	"sigs.k8s.io/controller-runtime/pkg/envtest"
+
+	helper "github.com/opendatahub-io/mod-arch-library/bff/internal/helpers"
+
+	"github.com/opendatahub-io/mod-arch-library/bff/internal/config"
+	"github.com/opendatahub-io/mod-arch-library/bff/internal/proxy"
+	"github.com/opendatahub-io/mod-arch-library/bff/internal/repositories"
+
+	"github.com/julienschmidt/httprouter"
+)
+
+const (
+	Version         = "1.0.0"
+	PathPrefix      = "/mod-arch"
+	ApiPathPrefix   = "/api/v1"
+	HealthCheckPath = "/healthcheck"
+	UserPath        = ApiPathPrefix + "/user"
+	NamespacePath   = ApiPathPrefix + "/namespaces"
+	ConnectionsPath = ApiPathPrefix + "/connections"
+)
+
+type App struct {
+	config                  config.EnvConfig
+	logger                  *slog.Logger
+	kubernetesClientFactory k8s.KubernetesClientFactory
+	repositories            *repositories.Repositories
+	//used only on mocked k8s client
+	testEnv *envtest.Environment
+	// rootCAs used for outbound TLS connections to Client Service
+	rootCAs *x509.CertPool
+	// bffClientFactory creates clients for inter-BFF communication
+	bffClientFactory bffclient.BFFClientFactory
+	wsTracker        *proxy.ConnectionTracker
+}
+
+func NewApp(cfg config.EnvConfig, logger *slog.Logger) (*App, error) {
+	logger.Debug("Initializing app with config", slog.Any("config", cfg))
+	var k8sFactory k8s.KubernetesClientFactory
+	var err error
+	// used only on mocked k8s client
+	var testEnv *envtest.Environment
+	var rootCAs *x509.CertPool
+
+	// Initialize CA pool if bundle paths are provided
+	if len(cfg.BundlePaths) > 0 {
+		// Start with system certs if available
+		if pool, err := x509.SystemCertPool(); err == nil {
+			rootCAs = pool
+		} else {
+			rootCAs = x509.NewCertPool()
+		}
+		var loadedAny bool
+		for _, p := range cfg.BundlePaths {
+			p = strings.TrimSpace(p)
+			if p == "" {
+				continue
+			}
+			// Read and append each PEM bundle; ignore errors per file, log at debug
+			pemBytes, readErr := os.ReadFile(p)
+			if readErr != nil {
+				logger.Debug("CA bundle not readable, skipping", slog.String("path", p), slog.Any("error", readErr))
+				continue
+			}
+			if ok := rootCAs.AppendCertsFromPEM(pemBytes); !ok {
+				logger.Debug("No certs appended from PEM bundle", slog.String("path", p))
+				continue
+			}
+			loadedAny = true
+			logger.Info("Added CA bundle", slog.String("path", p))
+		}
+		if !loadedAny {
+			// If none were loaded successfully, keep rootCAs nil to fall back to default transport behavior
+			rootCAs = nil
+			logger.Warn("No CA certificates loaded from bundle-paths; falling back to system defaults")
+		}
+	}
+
+	if cfg.MockK8Client {
+		//mock all k8s calls with 'env test'
+		var clientset kubernetes.Interface
+		ctx, cancel := context.WithCancel(context.Background())
+		testEnv, clientset, err = k8mocks.SetupEnvTest(k8mocks.TestEnvInput{
+			Logger: logger,
+			Ctx:    ctx,
+			Cancel: cancel,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("failed to setup envtest: %w", err)
+		}
+		//create mocked kubernetes client factory
+		k8sFactory, err = k8mocks.NewMockedKubernetesClientFactory(clientset, testEnv, cfg, logger)
+
+	} else {
+		//create kubernetes client factory
+		k8sFactory, err = k8s.NewKubernetesClientFactory(cfg, logger)
+	}
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to create Kubernetes client: %w", err)
+	}
+
+	// Initialize BFF client factory for inter-BFF communication
+	var bffFactory bffclient.BFFClientFactory
+	bffConfig := bffclient.NewDefaultBFFClientConfig()
+	bffConfig.MockBFFClients = cfg.MockBFFClients
+	bffConfig.InsecureSkipVerify = cfg.InsecureSkipVerify
+
+	// Apply target-specific configuration overrides from CLI flags/env vars here.
+	// Example: to configure a target BFF, add fields to EnvConfig and apply them:
+	//
+	//   if targetCfg := bffConfig.GetServiceConfig(bffclient.BFFTargetMaaS); targetCfg != nil {
+	//       targetCfg.ServiceName = cfg.BFFTargetServiceName
+	//       targetCfg.Port = cfg.BFFTargetServicePort
+	//       targetCfg.DevOverrideURL = cfg.BFFTargetDevURL
+	//   }
+
+	if cfg.MockBFFClients {
+		logger.Info("Using mock BFF client factory")
+		bffFactory = bffmocks.NewMockClientFactory(logger)
+	} else {
+		logger.Info("Using real BFF client factory")
+		bffFactory = bffclient.NewRealClientFactory(bffConfig, rootCAs, cfg.InsecureSkipVerify, logger)
+	}
+
+	app := &App{
+		config:                  cfg,
+		logger:                  logger,
+		kubernetesClientFactory: k8sFactory,
+		repositories:            repositories.NewRepositories(),
+		testEnv:                 testEnv,
+		rootCAs:                 rootCAs,
+		bffClientFactory:        bffFactory,
+	}
+
+	app.wsTracker = proxy.NewConnectionTracker(app.logger)
+
+	return app, nil
+}
+
+func (app *App) Shutdown() error {
+	app.logger.Info("shutting down app...")
+	if app.wsTracker != nil {
+		app.wsTracker.Stop()
+	}
+	if app.testEnv == nil {
+		return nil
+	}
+	app.logger.Info("shutting env test...")
+	return app.testEnv.Stop()
+}
+
+func (app *App) Routes() http.Handler {
+	// Router for /api/v1/*
+	apiRouter := httprouter.New()
+
+	apiRouter.NotFound = http.HandlerFunc(app.notFoundResponse)
+	apiRouter.MethodNotAllowed = http.HandlerFunc(app.methodNotAllowedResponse)
+
+	// Minimal Kubernetes-backed starter endpoints
+	apiRouter.GET(UserPath, app.UserHandler)
+	apiRouter.GET(NamespacePath, app.GetNamespacesHandler)
+	apiRouter.GET(ConnectionsPath, app.GetConnectionsHandler)
+
+	// Inter-BFF Communication routes — wire your target BFF endpoints here.
+	// Example:
+	//
+	//   apiRouter.POST(ApiPathPrefix+"/bff/<target>/endpoint",
+	//       app.AttachNamespace(
+	//           bffclient.AttachBFFClient(app.bffClientFactory, bffclient.BFFTarget<Target>)(
+	//               app.YourHandler)))
+
+	// App Router
+	appMux := http.NewServeMux()
+
+	// Catalog API reverse proxy — forwards /api/catalog/* to the shared catalog server
+	catalogURL := os.Getenv("CATALOG_API_URL")
+	if catalogURL == "" {
+		catalogURL = "http://feast-catalog.redhat-ods-applications.svc:6572"
+	}
+	catalogProxy := func(w http.ResponseWriter, r *http.Request) {
+		targetPath := r.URL.Path
+		for _, prefix := range []string{PathPrefix + "/api/catalog", "/api/catalog"} {
+			if strings.HasPrefix(targetPath, prefix) {
+				targetPath = strings.TrimPrefix(targetPath, prefix)
+				break
+			}
+		}
+		// Pass through the path as-is — the frontend includes the project prefix
+		// e.g. /v1/option2-poc/namespaces → forwarded as /v1/option2-poc/namespaces
+		// /projects → forwarded as /projects
+		targetURL := catalogURL + targetPath
+		if r.URL.RawQuery != "" {
+			targetURL += "?" + r.URL.RawQuery
+		}
+		proxyReq, err := http.NewRequestWithContext(r.Context(), r.Method, targetURL, r.Body)
+		if err != nil {
+			http.Error(w, "proxy error", http.StatusBadGateway)
+			return
+		}
+		for k, vv := range r.Header {
+			for _, v := range vv {
+				proxyReq.Header.Add(k, v)
+			}
+		}
+		resp, err := http.DefaultClient.Do(proxyReq)
+		if err != nil {
+			http.Error(w, "catalog unreachable", http.StatusBadGateway)
+			return
+		}
+		defer resp.Body.Close()
+		for k, vv := range resp.Header {
+			for _, v := range vv {
+				w.Header().Add(k, v)
+			}
+		}
+		w.WriteHeader(resp.StatusCode)
+		io.Copy(w, resp.Body)
+	}
+	appMux.HandleFunc("/api/catalog/", catalogProxy)
+	appMux.HandleFunc(PathPrefix+"/api/catalog/", catalogProxy)
+
+	// handler for api calls
+	appMux.Handle(ApiPathPrefix+"/", apiRouter)
+	appMux.Handle(PathPrefix+ApiPathPrefix+"/", http.StripPrefix(PathPrefix, apiRouter))
+
+	// file server for the frontend file and SPA routes
+	staticDir := http.Dir(app.config.StaticAssetsDir)
+	fileServer := http.FileServer(staticDir)
+	appMux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		ctxLogger := helper.GetContextLoggerFromReq(r)
+		// Check if the requested file exists
+		if _, err := staticDir.Open(r.URL.Path); err == nil {
+			ctxLogger.Debug("Serving static file", slog.String("path", r.URL.Path))
+			// Serve the file if it exists
+			fileServer.ServeHTTP(w, r)
+			return
+		}
+
+		// Fallback to index.html for SPA routes
+		ctxLogger.Debug("Static asset not found, serving index.html", slog.String("path", r.URL.Path))
+		http.ServeFile(w, r, path.Join(app.config.StaticAssetsDir, "index.html"))
+	})
+
+	// Create a mux for the healthcheck endpoint
+	healthcheckMux := http.NewServeMux()
+	healthcheckRouter := httprouter.New()
+	healthcheckRouter.GET(HealthCheckPath, app.HealthcheckHandler)
+	healthcheckMux.Handle(HealthCheckPath, app.RecoverPanic(app.EnableTelemetry(healthcheckRouter)))
+
+	// Combines the healthcheck endpoint with the rest of the routes
+	// Apply middleware to appMux which contains the API routes
+	combinedMux := http.NewServeMux()
+	combinedMux.Handle(HealthCheckPath, healthcheckMux)
+	combinedMux.Handle("/", app.RecoverPanic(app.EnableTelemetry(app.EnableCORS(app.InjectRequestIdentity(appMux)))))
+
+	return combinedMux
+}

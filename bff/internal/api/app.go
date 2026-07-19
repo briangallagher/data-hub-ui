@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"crypto/tls"
 	"net/http"
 	"os"
 	"path"
@@ -195,6 +196,11 @@ func (app *App) Routes() http.Handler {
 	if catalogURL == "" {
 		catalogURL = "http://feast-catalog.redhat-ods-applications.svc:6572"
 	}
+	catalogClient := &http.Client{
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+		},
+	}
 	catalogProxy := func(w http.ResponseWriter, r *http.Request) {
 		targetPath := r.URL.Path
 		for _, prefix := range []string{PathPrefix + "/api/catalog", "/api/catalog"} {
@@ -220,7 +226,7 @@ func (app *App) Routes() http.Handler {
 				proxyReq.Header.Add(k, v)
 			}
 		}
-		resp, err := http.DefaultClient.Do(proxyReq)
+		resp, err := catalogClient.Do(proxyReq)
 		if err != nil {
 			http.Error(w, "catalog unreachable", http.StatusBadGateway)
 			return

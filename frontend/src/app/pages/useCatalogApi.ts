@@ -53,6 +53,7 @@ export interface CollectionInfo {
   tableCount: number;
   volumeCount: number;
   createdDate: string;
+  properties: Record<string, string>;
 }
 
 export interface SearchResult {
@@ -256,6 +257,7 @@ export function useCollections(project: string) {
           tableCount,
           volumeCount,
           createdDate,
+          properties: nsProps,
         });
       }
 
@@ -290,6 +292,7 @@ export function useAllProjectsCollections(projects: ProjectInfo[]) {
               tableCount: 0,
               volumeCount: 0,
               createdDate: '',
+              properties: {},
             });
           }
         } catch { /* skip inaccessible projects */ }

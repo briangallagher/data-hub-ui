@@ -18,12 +18,20 @@ import {
   LabelGroup,
   Card,
   CardBody,
+  Modal,
+  ModalVariant,
+  ModalHeader,
+  ModalBody,
+  ModalFooter,
 } from '@patternfly/react-core';
 import { Table, Thead, Tr, Th, Tbody, Td } from '@patternfly/react-table';
+import { TrashIcon, PencilAltIcon } from '@patternfly/react-icons';
 import { useParams, Link, useSearchParams } from 'react-router-dom';
-import { useTablesAndVolumes, useConnections } from './useCatalogApi';
+import { useTablesAndVolumes, useConnections, useDeleteTable, useDeleteVolume } from './useCatalogApi';
 import RegisterTableModal from './RegisterTableModal';
 import RegisterVolumeModal from './RegisterVolumeModal';
+import EditTableModal from './EditTableModal';
+import EditVolumeModal from './EditVolumeModal';
 
 const FORMAT_COLORS: Record<string, 'orange' | 'blue' | 'green' | 'purple' | 'grey'> = {
   iceberg: 'orange',
@@ -55,6 +63,13 @@ const CollectionDetailPage: React.FC = () => {
   const [volumeFilter, setVolumeFilter] = React.useState('');
   const [showRegisterTable, setShowRegisterTable] = React.useState(false);
   const [showRegisterVolume, setShowRegisterVolume] = React.useState(false);
+  const [deleteTableTarget, setDeleteTableTarget] = React.useState<string | null>(null);
+  const [deleteVolumeTarget, setDeleteVolumeTarget] = React.useState<string | null>(null);
+  const [editTableTarget, setEditTableTarget] = React.useState<string | null>(null);
+  const [editVolumeTarget, setEditVolumeTarget] = React.useState<string | null>(null);
+
+  const deleteTableMutation = useDeleteTable();
+  const deleteVolumeMutation = useDeleteVolume();
 
   const allAssets = assetsQuery.data || [];
   const tables = allAssets.filter((a) => !a.isVolume);
@@ -77,6 +92,24 @@ const CollectionDetailPage: React.FC = () => {
     );
   }, [volumes, volumeFilter]);
 
+  const handleDeleteTable = async () => {
+    if (!deleteTableTarget) return;
+    try {
+      await deleteTableMutation.mutateAsync({ project, namespace, name: deleteTableTarget });
+    } finally {
+      setDeleteTableTarget(null);
+    }
+  };
+
+  const handleDeleteVolume = async () => {
+    if (!deleteVolumeTarget) return;
+    try {
+      await deleteVolumeMutation.mutateAsync({ project, namespace, name: deleteVolumeTarget });
+    } finally {
+      setDeleteVolumeTarget(null);
+    }
+  };
+
   if (assetsQuery.isLoading) {
     return (
       <PageSection>
@@ -89,7 +122,7 @@ const CollectionDetailPage: React.FC = () => {
 
   return (
     <>
-      <PageSection variant="light">
+      <PageSection>
         <Breadcrumb style={{ marginBottom: '8px' }}>
           <BreadcrumbItem>
             <Link to={`/ai-hub/data/collections?project=${project}`}>Data registry</Link>
@@ -110,7 +143,7 @@ const CollectionDetailPage: React.FC = () => {
             </Title>
             <Toolbar>
               <ToolbarContent>
-                <ToolbarItem variant="search-filter">
+                <ToolbarItem>
                   <SearchInput
                     placeholder="Filter tables"
                     value={tableFilter}
@@ -149,6 +182,7 @@ const CollectionDetailPage: React.FC = () => {
                 <Th>Storage location</Th>
                 <Th>Connection</Th>
                 <Th>Tags</Th>
+                <Th>Actions</Th>
               </Tr>
             </Thead>
             <Tbody>
@@ -192,12 +226,30 @@ const CollectionDetailPage: React.FC = () => {
                       {displayTags.length > 0 ? (
                         <LabelGroup numLabels={3}>
                           {displayTags.map((tag) => (
-                            <Label key={tag.key} isCompact color="cyan">
+                            <Label key={tag.key} isCompact color="teal">
                               {tag.key}: {tag.value}
                             </Label>
                           ))}
                         </LabelGroup>
                       ) : '—'}
+                    </Td>
+                    <Td dataLabel="Actions">
+                      <Button
+                        variant="plain"
+                        aria-label="Edit"
+                        onClick={() => setEditTableTarget(table.name)}
+                        style={{ padding: '4px' }}
+                      >
+                        <PencilAltIcon />
+                      </Button>
+                      <Button
+                        variant="plain"
+                        aria-label="Delete"
+                        onClick={() => setDeleteTableTarget(table.name)}
+                        style={{ padding: '4px' }}
+                      >
+                        <TrashIcon />
+                      </Button>
                     </Td>
                   </Tr>
                 );
@@ -218,7 +270,7 @@ const CollectionDetailPage: React.FC = () => {
             </Title>
             <Toolbar>
               <ToolbarContent>
-                <ToolbarItem variant="search-filter">
+                <ToolbarItem>
                   <SearchInput
                     placeholder="Filter volumes"
                     value={volumeFilter}
@@ -256,6 +308,7 @@ const CollectionDetailPage: React.FC = () => {
                 <Th>Storage location</Th>
                 <Th>Connection</Th>
                 <Th>Tags</Th>
+                <Th>Actions</Th>
               </Tr>
             </Thead>
             <Tbody>
@@ -291,12 +344,30 @@ const CollectionDetailPage: React.FC = () => {
                       {displayTags.length > 0 ? (
                         <LabelGroup numLabels={3}>
                           {displayTags.map((tag) => (
-                            <Label key={tag.key} isCompact color="cyan">
+                            <Label key={tag.key} isCompact color="teal">
                               {tag.key}: {tag.value}
                             </Label>
                           ))}
                         </LabelGroup>
                       ) : '—'}
+                    </Td>
+                    <Td dataLabel="Actions">
+                      <Button
+                        variant="plain"
+                        aria-label="Edit"
+                        onClick={() => setEditVolumeTarget(vol.name)}
+                        style={{ padding: '4px' }}
+                      >
+                        <PencilAltIcon />
+                      </Button>
+                      <Button
+                        variant="plain"
+                        aria-label="Delete"
+                        onClick={() => setDeleteVolumeTarget(vol.name)}
+                        style={{ padding: '4px' }}
+                      >
+                        <TrashIcon />
+                      </Button>
                     </Td>
                   </Tr>
                 );
@@ -325,6 +396,93 @@ const CollectionDetailPage: React.FC = () => {
           onClose={() => setShowRegisterVolume(false)}
         />
       )}
+
+      {deleteTableTarget && (
+        <Modal
+          variant={ModalVariant.small}
+          isOpen
+          onClose={() => setDeleteTableTarget(null)}
+          aria-label="Delete table"
+        >
+          <ModalHeader title="Delete table" />
+          <ModalBody>
+            Are you sure you want to delete the table <strong>{deleteTableTarget}</strong>?
+            This action cannot be undone.
+          </ModalBody>
+          <ModalFooter>
+            <Button
+              variant="danger"
+              onClick={handleDeleteTable}
+              isLoading={deleteTableMutation.isPending}
+              isDisabled={deleteTableMutation.isPending}
+            >
+              Delete
+            </Button>
+            <Button variant="link" onClick={() => setDeleteTableTarget(null)}>
+              Cancel
+            </Button>
+          </ModalFooter>
+        </Modal>
+      )}
+
+      {deleteVolumeTarget && (
+        <Modal
+          variant={ModalVariant.small}
+          isOpen
+          onClose={() => setDeleteVolumeTarget(null)}
+          aria-label="Delete volume"
+        >
+          <ModalHeader title="Delete volume" />
+          <ModalBody>
+            Are you sure you want to delete the volume <strong>{deleteVolumeTarget}</strong>?
+            This action cannot be undone.
+          </ModalBody>
+          <ModalFooter>
+            <Button
+              variant="danger"
+              onClick={handleDeleteVolume}
+              isLoading={deleteVolumeMutation.isPending}
+              isDisabled={deleteVolumeMutation.isPending}
+            >
+              Delete
+            </Button>
+            <Button variant="link" onClick={() => setDeleteVolumeTarget(null)}>
+              Cancel
+            </Button>
+          </ModalFooter>
+        </Modal>
+      )}
+
+      {editTableTarget && (() => {
+        const table = tables.find((t) => t.name === editTableTarget);
+        if (!table) return null;
+        return (
+          <EditTableModal
+            project={project}
+            namespace={namespace}
+            name={table.name}
+            currentDescription={table.description}
+            currentProperties={table.tags}
+            onClose={() => setEditTableTarget(null)}
+          />
+        );
+      })()}
+
+      {editVolumeTarget && (() => {
+        const vol = volumes.find((v) => v.name === editVolumeTarget);
+        if (!vol) return null;
+        return (
+          <EditVolumeModal
+            project={project}
+            namespace={namespace}
+            name={vol.name}
+            currentDescription={vol.description}
+            currentProperties={vol.tags}
+            currentLocation={vol.location}
+            onClose={() => setEditVolumeTarget(null)}
+          />
+        );
+      })()}
     </>
   );
 };

@@ -48,10 +48,23 @@ export interface ProjectInfo {
 
 export interface CollectionInfo {
   name: string;
+  project: string;
   description: string;
   tableCount: number;
   volumeCount: number;
   createdDate: string;
+}
+
+export interface SearchResult {
+  type: 'collection' | 'table' | 'volume';
+  name: string;
+  project: string;
+  namespace: string;
+  description: string;
+  format?: string;
+  location?: string;
+  connectionRef?: string;
+  tags?: Record<string, string>;
 }
 
 export interface TableAsset {
@@ -91,6 +104,35 @@ async function fetchJson<T>(url: string): Promise<T> {
 async function postJson<T>(url: string, body: unknown): Promise<T> {
   const resp = await fetch(url, {
     method: 'POST',
+    credentials: 'include',
+    headers: {
+      'Content-Type': 'application/json',
+      'kubeflow-userid': 'admin@example.com',
+    },
+    body: JSON.stringify(body),
+  });
+  if (!resp.ok) {
+    const text = await resp.text().catch(() => '');
+    throw new Error(`API error: ${resp.status} ${resp.statusText} — ${text}`);
+  }
+  return resp.json();
+}
+
+async function deleteRequest(url: string): Promise<void> {
+  const resp = await fetch(url, {
+    method: 'DELETE',
+    credentials: 'include',
+    headers: { 'kubeflow-userid': 'admin@example.com' },
+  });
+  if (!resp.ok) {
+    const text = await resp.text().catch(() => '');
+    throw new Error(`API error: ${resp.status} ${resp.statusText} — ${text}`);
+  }
+}
+
+async function putJson<T>(url: string, body: unknown): Promise<T> {
+  const resp = await fetch(url, {
+    method: 'PUT',
     credentials: 'include',
     headers: {
       'Content-Type': 'application/json',
@@ -209,6 +251,7 @@ export function useCollections(project: string) {
 
         collections.push({
           name: nsName,
+          project,
           description,
           tableCount,
           volumeCount,
@@ -218,7 +261,145 @@ export function useCollections(project: string) {
 
       return collections;
     },
-    enabled: !!project && !!namespacesQuery.data && (namespacesQuery.data.namespaces?.length ?? 0) > 0,
+    enabled: !!project && !!namespacesQuery.data,
+  });
+}
+
+// --- All-Projects Collections ---
+
+export function useAllProjectsCollections(projects: ProjectInfo[]) {
+  const projectNames = projects.map((p) => p.name);
+
+  return useQuery({
+    queryKey: ['catalog', 'all-collections', projectNames],
+    queryFn: async (): Promise<CollectionInfo[]> => {
+      const allCollections: CollectionInfo[] = [];
+
+      for (const projectName of projectNames) {
+        try {
+          const nsResp = await fetchJson<ListNamespacesResponse>(
+            `${catalogPath(projectName)}/namespaces`,
+          );
+          for (const ns of nsResp.namespaces || []) {
+            const nsName = ns[0];
+            if (!nsName) continue;
+            allCollections.push({
+              name: nsName,
+              project: projectName,
+              description: '',
+              tableCount: 0,
+              volumeCount: 0,
+              createdDate: '',
+            });
+          }
+        } catch { /* skip inaccessible projects */ }
+      }
+
+      return allCollections;
+    },
+    enabled: projectNames.length > 0,
+    staleTime: 60000,
+  });
+}
+
+// --- Multi-level Search ---
+
+export function useSearchAssets(
+  project: string,
+  collections: CollectionInfo[],
+  query: string,
+  includeAssets: boolean,
+) {
+  return useQuery({
+    queryKey: ['catalog', 'search', project, query, includeAssets],
+    queryFn: async (): Promise<SearchResult[]> => {
+      const q = query.toLowerCase();
+      const results: SearchResult[] = [];
+
+      const targetCollections = project
+        ? collections.filter((c) => c.project === project)
+        : collections;
+
+      for (const coll of targetCollections) {
+        if (
+          coll.name.toLowerCase().includes(q) ||
+          coll.description.toLowerCase().includes(q)
+        ) {
+          results.push({
+            type: 'collection',
+            name: coll.name,
+            project: coll.project,
+            namespace: coll.name,
+            description: coll.description,
+          });
+        }
+      }
+
+      if (!includeAssets) return results;
+
+      const searchProjects = project
+        ? [project]
+        : [...new Set(targetCollections.map((c) => c.project))];
+
+      for (const proj of searchProjects) {
+        const projCollections = targetCollections.filter((c) => c.project === proj);
+        for (const coll of projCollections) {
+          try {
+            const tablesResp = await fetchJson<ListTablesResponse>(
+              `${namespacePath(proj, coll.name)}/tables`,
+            );
+            for (const id of tablesResp.identifiers || []) {
+              try {
+                const detail = await fetchJson<LoadTableResult>(
+                  `${namespacePath(proj, coll.name)}/tables/${id.name}`,
+                );
+                const props = detail.metadata?.properties || {};
+                const desc = props.description || '';
+                const name = id.name;
+                if (name.toLowerCase().includes(q) || desc.toLowerCase().includes(q)) {
+                  results.push({
+                    type: 'table',
+                    name,
+                    project: proj,
+                    namespace: coll.name,
+                    description: desc,
+                    format: props.format,
+                    location: detail.metadata?.location,
+                    connectionRef: props['connection-ref'],
+                    tags: props,
+                  });
+                }
+              } catch { /* skip */ }
+            }
+          } catch { /* skip */ }
+
+          try {
+            const volResp = await fetchJson<ListVolumesResponse>(
+              `${namespacePath(proj, coll.name)}/volumes`,
+            );
+            for (const vol of volResp.volumes || []) {
+              const desc = vol.comment || '';
+              if (vol.name.toLowerCase().includes(q) || desc.toLowerCase().includes(q)) {
+                results.push({
+                  type: 'volume',
+                  name: vol.name,
+                  project: proj,
+                  namespace: coll.name,
+                  description: desc,
+                  location: vol['storage-location'],
+                  connectionRef: vol.properties?.['connection-ref'],
+                  tags: vol.properties,
+                });
+              }
+            }
+          } catch { /* skip */ }
+        }
+      }
+
+      return results;
+    },
+    enabled: query.length >= 2 && collections.length > 0,
+    staleTime: 30000,
   });
 }
 
@@ -413,6 +594,168 @@ export function useCreateNamespace() {
       await queryClient.invalidateQueries({ queryKey: ['catalog', 'collections', variables.project] });
       queryClient.refetchQueries({ queryKey: ['catalog', 'namespaces', variables.project] });
       queryClient.refetchQueries({ queryKey: ['catalog', 'collections', variables.project] });
+    },
+  });
+}
+
+// --- Delete Namespace (Collection) ---
+
+export function useDeleteNamespace() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (payload: { project: string; name: string }) => {
+      return deleteRequest(`${catalogPath(payload.project)}/namespaces/${payload.name}`);
+    },
+    onSuccess: (_data, variables) => {
+      queryClient.invalidateQueries({ queryKey: ['catalog', 'namespaces', variables.project] });
+      queryClient.invalidateQueries({ queryKey: ['catalog', 'collections', variables.project] });
+    },
+  });
+}
+
+// --- Delete Table ---
+
+export function useDeleteTable() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (payload: { project: string; namespace: string; name: string }) => {
+      return deleteRequest(
+        `${namespacePath(payload.project, payload.namespace)}/tables/${payload.name}`,
+      );
+    },
+    onSuccess: (_data, variables) => {
+      queryClient.invalidateQueries({ queryKey: ['catalog', 'tables-and-volumes', variables.project, variables.namespace] });
+      queryClient.invalidateQueries({ queryKey: ['catalog', 'collections', variables.project] });
+    },
+  });
+}
+
+// --- Delete Volume ---
+
+export function useDeleteVolume() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (payload: { project: string; namespace: string; name: string }) => {
+      return deleteRequest(
+        `${namespacePath(payload.project, payload.namespace)}/volumes/${payload.name}`,
+      );
+    },
+    onSuccess: (_data, variables) => {
+      queryClient.invalidateQueries({ queryKey: ['catalog', 'tables-and-volumes', variables.project, variables.namespace] });
+      queryClient.invalidateQueries({ queryKey: ['catalog', 'collections', variables.project] });
+    },
+  });
+}
+
+// --- Update Table (set-properties / remove-properties) ---
+
+export interface UpdateTablePayload {
+  project: string;
+  namespace: string;
+  name: string;
+  setProperties?: Record<string, string>;
+  removeProperties?: string[];
+}
+
+export function useUpdateTable() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (payload: UpdateTablePayload) => {
+      const updates: Array<{ action: string; updates?: Record<string, string>; removals?: string[] }> = [];
+      if (payload.setProperties && Object.keys(payload.setProperties).length > 0) {
+        updates.push({ action: 'set-properties', updates: payload.setProperties });
+      }
+      if (payload.removeProperties && payload.removeProperties.length > 0) {
+        updates.push({ action: 'remove-properties', removals: payload.removeProperties });
+      }
+      return postJson(
+        `${namespacePath(payload.project, payload.namespace)}/tables/${payload.name}`,
+        { updates },
+      );
+    },
+    onSuccess: (_data, variables) => {
+      queryClient.invalidateQueries({ queryKey: ['catalog', 'tables-and-volumes', variables.project, variables.namespace] });
+    },
+  });
+}
+
+// --- Update Volume (PUT) ---
+
+export interface UpdateVolumePayload {
+  project: string;
+  namespace: string;
+  name: string;
+  comment?: string;
+  properties?: Record<string, string>;
+  storageLocation?: string;
+}
+
+export function useUpdateVolume() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (payload: UpdateVolumePayload) => {
+      const body: any = {};
+      if (payload.comment !== undefined) body.comment = payload.comment;
+      if (payload.properties) body.properties = payload.properties;
+      if (payload.storageLocation) body.storage_location = payload.storageLocation;
+      return putJson(
+        `${namespacePath(payload.project, payload.namespace)}/volumes/${payload.name}`,
+        body,
+      );
+    },
+    onSuccess: (_data, variables) => {
+      queryClient.invalidateQueries({ queryKey: ['catalog', 'tables-and-volumes', variables.project, variables.namespace] });
+    },
+  });
+}
+
+// --- Create Connection (via BFF → K8s Secret) ---
+
+export interface CreateConnectionPayload {
+  namespace: string;
+  name: string;
+  displayName: string;
+  description: string;
+  connectionType: string;
+  accessKey: string;
+  secretKey: string;
+  endpoint: string;
+  bucket: string;
+  region: string;
+}
+
+export function useCreateConnection() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (payload: CreateConnectionPayload) => {
+      return postJson<DataConnection>(
+        `${BFF_BASE}/connections?namespace=${payload.namespace}`,
+        payload,
+      );
+    },
+    onSuccess: (_data, variables) => {
+      queryClient.invalidateQueries({ queryKey: ['catalog', 'connections', variables.namespace] });
+    },
+  });
+}
+
+// --- Delete Connection (via BFF → K8s Secret) ---
+
+export function useDeleteConnection() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (payload: { namespace: string; name: string }) => {
+      return deleteRequest(`${BFF_BASE}/connections/${payload.name}?namespace=${payload.namespace}`);
+    },
+    onSuccess: (_data, variables) => {
+      queryClient.invalidateQueries({ queryKey: ['catalog', 'connections', variables.namespace] });
     },
   });
 }

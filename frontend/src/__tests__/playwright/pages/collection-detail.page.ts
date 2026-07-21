@@ -184,7 +184,7 @@ export class CollectionDetailPage {
       for (const key of opts.removeTags) {
         const tagRow = modal.locator('div').filter({ hasText: `${key}:` }).first();
         if (await tagRow.isVisible()) {
-          await tagRow.getByText('×').click();
+          await tagRow.getByRole('button', { name: '×' }).first().click();
         }
       }
     }
@@ -225,7 +225,7 @@ export class CollectionDetailPage {
       for (const key of opts.removeTags) {
         const tagRow = modal.locator('div').filter({ hasText: `${key}:` }).first();
         if (await tagRow.isVisible()) {
-          await tagRow.getByText('×').click();
+          await tagRow.getByRole('button', { name: '×' }).first().click();
         }
       }
     }

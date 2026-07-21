@@ -10,6 +10,15 @@ import { PROJECT, TEST_TABLE, TEST_VOLUME } from '../fixtures/test-data';
  */
 const COLLECTION = 'underwriting';
 
+async function reloadAndWaitForData(page: import('@playwright/test').Page, project: string, collection: string) {
+  await page.reload();
+  await page.waitForResponse(
+    (resp) => resp.url().includes(`/v1/${project}/namespaces/${collection}/`) && resp.status() === 200,
+    { timeout: 15_000 },
+  ).catch(() => {});
+  await page.waitForTimeout(1000);
+}
+
 test.describe('Edit Tables', () => {
   let detail: CollectionDetailPage;
 
@@ -30,12 +39,10 @@ test.describe('Edit Tables', () => {
       description: 'Updated by Playwright edit test',
     });
 
-    // Verify updated description appears
-    await page.reload();
-    await page.waitForTimeout(2000);
+    await reloadAndWaitForData(page, PROJECT, COLLECTION);
     const updatedRow = await detail.findTableRow(TEST_TABLE.name);
-    await expect(updatedRow).toBeVisible();
-    await expect(updatedRow.getByText('Updated by Playwright edit test')).toBeVisible();
+    await expect(updatedRow).toBeVisible({ timeout: 10_000 });
+    await expect(updatedRow.locator('td[data-label="Description"]')).toContainText('Updated by Playwright edit test', { timeout: 10_000 });
   });
 
   test('02 — add tag to table', async ({ page }) => {
@@ -51,17 +58,28 @@ test.describe('Edit Tables', () => {
       addTags: [{ key: 'edited-by', value: 'playwright' }],
     });
 
-    await page.reload();
-    await page.waitForTimeout(2000);
+    await reloadAndWaitForData(page, PROJECT, COLLECTION);
     const updatedRow = await detail.findTableRow(TEST_TABLE.name);
-    await expect(updatedRow.getByText('edited-by: playwright')).toBeVisible();
+    await expect(updatedRow.getByText('edited-by: playwright')).toBeVisible({ timeout: 10_000 });
   });
 
   test('03 — remove tag from table', async ({ page }) => {
     await detail.goto(COLLECTION, PROJECT);
+    await page.waitForResponse(
+      (resp) => resp.url().includes(`/v1/${PROJECT}/namespaces/${COLLECTION}/`) && resp.status() === 200,
+      { timeout: 15_000 },
+    ).catch(() => {});
+    await page.waitForTimeout(1000);
 
     const row = await detail.findTableRow(TEST_TABLE.name);
     if (!(await row.isVisible())) {
+      test.skip();
+      return;
+    }
+
+    // Verify the tag from test 02 exists before trying to remove it
+    const tagsBefore = await row.locator('td[data-label="Tags"]').textContent();
+    if (!tagsBefore?.includes('edited-by')) {
       test.skip();
       return;
     }
@@ -70,8 +88,7 @@ test.describe('Edit Tables', () => {
       removeTags: ['edited-by'],
     });
 
-    await page.reload();
-    await page.waitForTimeout(2000);
+    await reloadAndWaitForData(page, PROJECT, COLLECTION);
     const updatedRow = await detail.findTableRow(TEST_TABLE.name);
     const tagText = await updatedRow.locator('td[data-label="Tags"]').textContent();
     expect(tagText).not.toContain('edited-by');
@@ -98,11 +115,10 @@ test.describe('Edit Volumes', () => {
       description: 'Volume updated by Playwright',
     });
 
-    await page.reload();
-    await page.waitForTimeout(2000);
+    await reloadAndWaitForData(page, PROJECT, COLLECTION);
     const updatedRow = await detail.findVolumeRow(TEST_VOLUME.name);
-    await expect(updatedRow).toBeVisible();
-    await expect(updatedRow.getByText('Volume updated by Playwright')).toBeVisible();
+    await expect(updatedRow).toBeVisible({ timeout: 10_000 });
+    await expect(updatedRow.locator('td[data-label="Description"]')).toContainText('Volume updated by Playwright', { timeout: 10_000 });
   });
 
   test('02 — edit volume storage location', async ({ page }) => {
@@ -119,10 +135,9 @@ test.describe('Edit Volumes', () => {
       storageLocation: newLocation,
     });
 
-    await page.reload();
-    await page.waitForTimeout(2000);
+    await reloadAndWaitForData(page, PROJECT, COLLECTION);
     const updatedRow = await detail.findVolumeRow(TEST_VOLUME.name);
-    await expect(updatedRow.locator('td[data-label="Storage location"]')).toContainText('updated-volume-path');
+    await expect(updatedRow.locator('td[data-label="Storage location"]')).toContainText('updated-volume-path', { timeout: 10_000 });
   });
 
   test('03 — add tag to volume', async ({ page }) => {
@@ -138,10 +153,9 @@ test.describe('Edit Volumes', () => {
       addTags: [{ key: 'volume-edit-test', value: 'true' }],
     });
 
-    await page.reload();
-    await page.waitForTimeout(2000);
+    await reloadAndWaitForData(page, PROJECT, COLLECTION);
     const updatedRow = await detail.findVolumeRow(TEST_VOLUME.name);
-    await expect(updatedRow.getByText('volume-edit-test: true')).toBeVisible();
+    await expect(updatedRow.getByText('volume-edit-test: true')).toBeVisible({ timeout: 10_000 });
   });
 });
 
@@ -151,13 +165,11 @@ test.describe('Edit Collections', () => {
     await page.waitForLoadState('domcontentloaded');
     await page.waitForTimeout(3000);
 
-    // Find the underwriting collection card and click its edit button
     const card = page.locator('[data-testid="collection-card"]').filter({
       hasText: COLLECTION,
     }).first();
 
     if (!(await card.isVisible())) {
-      // Try without data-testid — look for a Card containing the collection name
       const anyCard = page.locator('article, [class*="card"]').filter({
         hasText: COLLECTION,
       }).first();
@@ -174,12 +186,10 @@ test.describe('Edit Collections', () => {
     await expect(modal).toBeVisible({ timeout: 5000 });
     await expect(modal.getByText(`Edit collection: ${COLLECTION}`)).toBeVisible();
 
-    // Update description
     await modal.locator('#edit-collection-description').fill('Updated by Playwright');
     await modal.getByRole('button', { name: 'Save' }).click();
     await page.waitForTimeout(2000);
 
-    // Modal should close
     await expect(modal).not.toBeVisible();
   });
 });

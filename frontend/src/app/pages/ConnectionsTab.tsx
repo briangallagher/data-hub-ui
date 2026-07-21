@@ -13,9 +13,16 @@ import {
   Button,
   Bullseye,
   Label,
+  Modal,
+  ModalVariant,
+  ModalHeader,
+  ModalBody,
+  ModalFooter,
 } from '@patternfly/react-core';
 import { Table, Thead, Tr, Th, Tbody, Td } from '@patternfly/react-table';
-import { useConnections } from './useCatalogApi';
+import { TrashIcon } from '@patternfly/react-icons';
+import { useConnections, useDeleteConnection } from './useCatalogApi';
+import CreateConnectionModal from './CreateConnectionModal';
 
 interface ConnectionsTabProps {
   project: string;
@@ -23,7 +30,10 @@ interface ConnectionsTabProps {
 
 const ConnectionsTab: React.FC<ConnectionsTabProps> = ({ project }) => {
   const [filterValue, setFilterValue] = React.useState('');
+  const [showCreate, setShowCreate] = React.useState(false);
+  const [deleteTarget, setDeleteTarget] = React.useState<string | null>(null);
   const connectionsQuery = useConnections(project);
+  const deleteMutation = useDeleteConnection();
   const connections = connectionsQuery.data || [];
 
   const filtered = React.useMemo(() => {
@@ -38,6 +48,15 @@ const ConnectionsTab: React.FC<ConnectionsTabProps> = ({ project }) => {
     );
   }, [connections, filterValue]);
 
+  const handleDelete = async () => {
+    if (!deleteTarget) return;
+    try {
+      await deleteMutation.mutateAsync({ namespace: project, name: deleteTarget });
+    } finally {
+      setDeleteTarget(null);
+    }
+  };
+
   return (
     <PageSection>
       <Title headingLevel="h2" size="xl" style={{ marginBottom: '16px' }}>
@@ -45,7 +64,7 @@ const ConnectionsTab: React.FC<ConnectionsTabProps> = ({ project }) => {
       </Title>
       <Toolbar>
         <ToolbarContent>
-          <ToolbarItem variant="search-filter">
+          <ToolbarItem>
             <SearchInput
               placeholder="Filter connections..."
               value={filterValue}
@@ -57,8 +76,7 @@ const ConnectionsTab: React.FC<ConnectionsTabProps> = ({ project }) => {
             <ToolbarItem>
               <Button
                 variant="primary"
-                component="a"
-                href={`/projects/${project}?section=connections`}
+                onClick={() => setShowCreate(true)}
               >
                 Create connection
               </Button>
@@ -93,6 +111,7 @@ const ConnectionsTab: React.FC<ConnectionsTabProps> = ({ project }) => {
               <Th>Namespace</Th>
               <Th>Endpoint</Th>
               <Th>Bucket</Th>
+              <Th>Actions</Th>
             </Tr>
           </Thead>
           <Tbody>
@@ -109,14 +128,59 @@ const ConnectionsTab: React.FC<ConnectionsTabProps> = ({ project }) => {
                   </Label>
                 </Td>
                 <Td dataLabel="Namespace">
-                  <a href="#" style={{ color: '#06c' }}>{conn.namespace}</a>
+                  <span style={{ color: '#06c' }}>{conn.namespace}</span>
                 </Td>
                 <Td dataLabel="Endpoint">{conn.endpoint || '—'}</Td>
                 <Td dataLabel="Bucket">{conn.bucket || '—'}</Td>
+                <Td dataLabel="Actions">
+                  <Button
+                    variant="plain"
+                    aria-label="Delete"
+                    onClick={() => setDeleteTarget(conn.name)}
+                    style={{ padding: '4px' }}
+                  >
+                    <TrashIcon />
+                  </Button>
+                </Td>
               </Tr>
             ))}
           </Tbody>
         </Table>
+      )}
+
+      {showCreate && (
+        <CreateConnectionModal
+          project={project}
+          onClose={() => setShowCreate(false)}
+        />
+      )}
+
+      {deleteTarget && (
+        <Modal
+          variant={ModalVariant.small}
+          isOpen
+          onClose={() => setDeleteTarget(null)}
+          aria-label="Delete connection"
+        >
+          <ModalHeader title="Delete connection" />
+          <ModalBody>
+            Are you sure you want to delete the connection <strong>{deleteTarget}</strong>?
+            This action cannot be undone.
+          </ModalBody>
+          <ModalFooter>
+            <Button
+              variant="danger"
+              onClick={handleDelete}
+              isLoading={deleteMutation.isPending}
+              isDisabled={deleteMutation.isPending}
+            >
+              Delete
+            </Button>
+            <Button variant="link" onClick={() => setDeleteTarget(null)}>
+              Cancel
+            </Button>
+          </ModalFooter>
+        </Modal>
       )}
     </PageSection>
   );

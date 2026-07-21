@@ -353,3 +353,9 @@ $RECYCLE.BIN/
 # Windows shortcuts
 *.lnk
 
+### Playwright ###
+frontend/playwright-report/
+frontend/playwright-results/
+frontend/test-results/
+frontend/playwright-auth.json
+

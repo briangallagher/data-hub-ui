@@ -35,7 +35,8 @@ const (
 	HealthCheckPath = "/healthcheck"
 	UserPath        = ApiPathPrefix + "/user"
 	NamespacePath   = ApiPathPrefix + "/namespaces"
-	ConnectionsPath = ApiPathPrefix + "/connections"
+	ConnectionsPath     = ApiPathPrefix + "/connections"
+	ConnectionByName    = ApiPathPrefix + "/connections/:name"
 )
 
 type App struct {
@@ -179,6 +180,8 @@ func (app *App) Routes() http.Handler {
 	apiRouter.GET(UserPath, app.UserHandler)
 	apiRouter.GET(NamespacePath, app.GetNamespacesHandler)
 	apiRouter.GET(ConnectionsPath, app.GetConnectionsHandler)
+	apiRouter.POST(ConnectionsPath, app.CreateConnectionHandler)
+	apiRouter.DELETE(ConnectionByName, app.DeleteConnectionHandler)
 
 	// Inter-BFF Communication routes — wire your target BFF endpoints here.
 	// Example:
@@ -209,9 +212,6 @@ func (app *App) Routes() http.Handler {
 				break
 			}
 		}
-		// Pass through the path as-is — the frontend includes the project prefix
-		// e.g. /v1/option2-poc/namespaces → forwarded as /v1/option2-poc/namespaces
-		// /projects → forwarded as /projects
 		targetURL := catalogURL + targetPath
 		if r.URL.RawQuery != "" {
 			targetURL += "?" + r.URL.RawQuery
@@ -224,6 +224,14 @@ func (app *App) Routes() http.Handler {
 		for k, vv := range r.Header {
 			for _, v := range vv {
 				proxyReq.Header.Add(k, v)
+			}
+		}
+		// Ensure the catalog server receives an Authorization header.
+		// The RHOAI dashboard sends the user token via x-forwarded-access-token;
+		// translate it so the catalog server's auth middleware accepts it.
+		if proxyReq.Header.Get("Authorization") == "" {
+			if fwd := r.Header.Get("X-Forwarded-Access-Token"); fwd != "" {
+				proxyReq.Header.Set("Authorization", "Bearer "+fwd)
 			}
 		}
 		resp, err := catalogClient.Do(proxyReq)

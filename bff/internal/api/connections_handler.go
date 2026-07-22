@@ -206,10 +206,6 @@ func listDataConnections(ctx context.Context, namespace, token string) ([]Connec
 }
 
 func createDataConnection(ctx context.Context, namespace, token string, req CreateConnectionRequest) (ConnectionModel, error) {
-	if token == "" {
-		return ConnectionModel{}, fmt.Errorf("no authentication token available — cannot create secrets (ensure you are logged in)")
-	}
-
 	clientset, err := newK8sClientset(token)
 	if err != nil {
 		return ConnectionModel{}, fmt.Errorf("creating clientset: %w", err)

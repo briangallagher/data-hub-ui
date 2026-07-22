@@ -74,3 +74,30 @@ roleRef:
 subjects:
 - kind: ServiceAccount
   name: mod-arch-ui
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: mod-arch-connections-manager
+rules:
+- apiGroups:
+  - ''
+  resources:
+  - secrets
+  verbs:
+  - get
+  - list
+  - create
+  - delete
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: mod-arch-connections-manager-binding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: mod-arch-connections-manager
+subjects:
+- kind: ServiceAccount
+  name: mod-arch-ui

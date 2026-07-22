@@ -227,11 +227,14 @@ func (app *App) Routes() http.Handler {
 			}
 		}
 		// Ensure the catalog server receives an Authorization header.
-		// The RHOAI dashboard sends the user token via x-forwarded-access-token;
-		// translate it so the catalog server's auth middleware accepts it.
+		// Priority: (1) explicit Authorization header from client,
+		// (2) X-Forwarded-Access-Token from RHOAI dashboard,
+		// (3) pod service account token (fallback for SSAR).
 		if proxyReq.Header.Get("Authorization") == "" {
 			if fwd := r.Header.Get("X-Forwarded-Access-Token"); fwd != "" {
 				proxyReq.Header.Set("Authorization", "Bearer "+fwd)
+			} else if saToken, err := os.ReadFile("/var/run/secrets/kubernetes.io/serviceaccount/token"); err == nil {
+				proxyReq.Header.Set("Authorization", "Bearer "+string(saToken))
 			}
 		}
 		resp, err := catalogClient.Do(proxyReq)

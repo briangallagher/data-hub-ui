@@ -324,9 +324,13 @@ export function useSearchAssets(
         : collections;
 
       for (const coll of targetCollections) {
+        const propsMatch = Object.entries(coll.properties || {}).some(
+          ([k, v]) => k.toLowerCase().includes(q) || String(v).toLowerCase().includes(q),
+        );
         if (
           coll.name.toLowerCase().includes(q) ||
-          coll.description.toLowerCase().includes(q)
+          coll.description.toLowerCase().includes(q) ||
+          propsMatch
         ) {
           results.push({
             type: 'collection',
@@ -359,7 +363,10 @@ export function useSearchAssets(
                 const props = detail.metadata?.properties || {};
                 const desc = props.description || '';
                 const name = id.name;
-                if (name.toLowerCase().includes(q) || desc.toLowerCase().includes(q)) {
+                const tagMatch = Object.entries(props).some(
+                  ([k, v]) => k.toLowerCase().includes(q) || String(v).toLowerCase().includes(q),
+                );
+                if (name.toLowerCase().includes(q) || desc.toLowerCase().includes(q) || tagMatch) {
                   results.push({
                     type: 'table',
                     name,
@@ -382,7 +389,11 @@ export function useSearchAssets(
             );
             for (const vol of volResp.volumes || []) {
               const desc = vol.comment || '';
-              if (vol.name.toLowerCase().includes(q) || desc.toLowerCase().includes(q)) {
+              const volProps = vol.properties || {};
+              const volTagMatch = Object.entries(volProps).some(
+                ([k, v]) => k.toLowerCase().includes(q) || String(v).toLowerCase().includes(q),
+              );
+              if (vol.name.toLowerCase().includes(q) || desc.toLowerCase().includes(q) || volTagMatch) {
                 results.push({
                   type: 'volume',
                   name: vol.name,

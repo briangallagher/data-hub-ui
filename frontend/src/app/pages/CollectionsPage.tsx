@@ -35,7 +35,6 @@ import {
   Form,
   FormGroup,
   TextInput,
-  Checkbox,
 } from '@patternfly/react-core';
 import { Table, Thead, Tr, Th, Tbody, Td } from '@patternfly/react-table';
 import {
@@ -49,6 +48,7 @@ import {
 import { useNavigate, useSearchParams, Link } from 'react-router-dom';
 import {
   useProjects,
+  useK8sNamespaces,
   useCollections,
   useAllProjectsCollections,
   useCreateNamespace,
@@ -71,7 +71,6 @@ const CollectionsPage: React.FC = () => {
   const activeTab = searchParams.get('tab') || 'collections';
   const selectedProject = searchParams.get('project') || '';
   const [filterValue, setFilterValue] = React.useState('');
-  const [includeAssets, setIncludeAssets] = React.useState(false);
   const navigate = useNavigate();
 
   const [isProjectOpen, setIsProjectOpen] = React.useState(false);
@@ -79,6 +78,9 @@ const CollectionsPage: React.FC = () => {
   const [newCollectionName, setNewCollectionName] = React.useState('');
   const [deleteTarget, setDeleteTarget] = React.useState<string | null>(null);
   const [editTarget, setEditTarget] = React.useState<string | null>(null);
+
+  const namespacesQuery = useK8sNamespaces();
+  const namespaces = namespacesQuery.data || [];
 
   const projectsQuery = useProjects();
   const projects = projectsQuery.data || [];
@@ -102,22 +104,22 @@ const CollectionsPage: React.FC = () => {
     activeProject,
     collections,
     isSearchActive ? filterValue : '',
-    includeAssets,
+    true,
   );
   const searchResults = searchQuery.data || [];
 
   const filteredCollections = React.useMemo(() => {
     if (!filterValue) return collections;
-    if (isSearchActive && includeAssets) return [];
+    if (isSearchActive) return [];
     const q = filterValue.toLowerCase();
     return collections.filter(
       (c) =>
         c.name.toLowerCase().includes(q) ||
         c.description.toLowerCase().includes(q),
     );
-  }, [collections, filterValue, isSearchActive, includeAssets]);
+  }, [collections, filterValue, isSearchActive]);
 
-  const showSearchResults = isSearchActive && includeAssets && searchResults.length > 0;
+  const showSearchResults = isSearchActive && searchResults.length > 0;
   const showGallery = !showSearchResults;
 
   const handleTabSelect = (_: React.MouseEvent, tabKey: string | number) => {
@@ -152,7 +154,7 @@ const CollectionsPage: React.FC = () => {
     return `${base}/${result.namespace}?project=${result.project}`;
   };
 
-  const isLoading = projectsQuery.isLoading ||
+  const isLoading = namespacesQuery.isLoading || projectsQuery.isLoading ||
     (activeProject ? singleProjectQuery.isLoading : allProjectsQuery.isLoading);
 
   const displayProject = activeProject || 'All projects';
@@ -194,9 +196,9 @@ const CollectionsPage: React.FC = () => {
                         <SelectOption key="__all__" value="__all__">
                           All projects
                         </SelectOption>
-                        {projects.map((p) => (
-                          <SelectOption key={p.name} value={p.name}>
-                            {p.name}
+                        {namespaces.map((ns) => (
+                          <SelectOption key={ns.name} value={ns.name}>
+                            {ns.name}
                           </SelectOption>
                         ))}
                       </SelectList>
@@ -223,14 +225,7 @@ const CollectionsPage: React.FC = () => {
                       onClear={() => setFilterValue('')}
                     />
                   </ToolbarItem>
-                  <ToolbarItem>
-                    <Checkbox
-                      id="include-assets"
-                      label="Include Tables/Volumes"
-                      isChecked={includeAssets}
-                      onChange={(_event, checked) => setIncludeAssets(checked)}
-                    />
-                  </ToolbarItem>
+                  
                   <ToolbarItem>
                     <Label color="blue" isCompact>
                       {showSearchResults
@@ -315,7 +310,7 @@ const CollectionsPage: React.FC = () => {
                 </Table>
               )}
 
-              {!isLoading && isSearchActive && includeAssets && !searchQuery.isLoading && searchResults.length === 0 && (
+              {!isLoading && isSearchActive && !searchQuery.isLoading && searchResults.length === 0 && (
                 <EmptyState titleText="No results found" icon={() => null}>
                   <EmptyStateBody>
                     No collections, tables, or volumes match &ldquo;{filterValue}&rdquo;.
@@ -411,7 +406,7 @@ const CollectionsPage: React.FC = () => {
             </PageSection>
           </Tab>
           <Tab eventKey="connections" title={<TabTitleText>Connections</TabTitleText>}>
-            <ConnectionsTab project={activeProject || projects[0]?.name || ''} />
+            <ConnectionsTab project={activeProject || namespaces[0]?.name || ''} />
           </Tab>
         </Tabs>
       </PageSection>

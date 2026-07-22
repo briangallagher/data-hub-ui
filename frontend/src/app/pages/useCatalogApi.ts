@@ -167,6 +167,26 @@ export function useProjects() {
   });
 }
 
+interface NamespaceEnvelope {
+  data: { name: string; displayName?: string }[];
+}
+
+export function useK8sNamespaces() {
+  return useQuery({
+    queryKey: ['bff', 'namespaces'],
+    queryFn: async (): Promise<{ name: string }[]> => {
+      const resp = await fetch(`${BFF_BASE}/namespaces`, {
+        credentials: 'include',
+        headers: { 'kubeflow-userid': 'admin@example.com' },
+      });
+      if (!resp.ok) throw new Error(`BFF error: ${resp.status}`);
+      const envelope: NamespaceEnvelope = await resp.json();
+      return envelope.data;
+    },
+    staleTime: 60000,
+  });
+}
+
 // --- Namespaces (collections within a project) ---
 
 export function useNamespaces(project: string) {
@@ -305,114 +325,65 @@ export function useAllProjectsCollections(projects: ProjectInfo[]) {
   });
 }
 
-// --- Multi-level Search ---
+// --- Server-side Search ---
+
+interface ServerSearchResult {
+  type: 'collection' | 'table' | 'volume';
+  namespace: string[];
+  name: string;
+  description: string | null;
+  properties: Record<string, string>;
+  score: number;
+  project: string;
+}
+
+interface ServerSearchResponse {
+  query: string;
+  results: ServerSearchResult[];
+  total: number;
+  page: number;
+  limit: number;
+}
 
 export function useSearchAssets(
   project: string,
   collections: CollectionInfo[],
   query: string,
-  includeAssets: boolean,
+  _includeAssets: boolean,
 ) {
   return useQuery({
-    queryKey: ['catalog', 'search', project, query, includeAssets],
+    queryKey: ['catalog', 'search', project, query],
     queryFn: async (): Promise<SearchResult[]> => {
-      const q = query.toLowerCase();
-      const results: SearchResult[] = [];
-
-      const targetCollections = project
-        ? collections.filter((c) => c.project === project)
-        : collections;
-
-      for (const coll of targetCollections) {
-        const propsMatch = Object.entries(coll.properties || {}).some(
-          ([k, v]) => k.toLowerCase().includes(q) || String(v).toLowerCase().includes(q),
-        );
-        if (
-          coll.name.toLowerCase().includes(q) ||
-          coll.description.toLowerCase().includes(q) ||
-          propsMatch
-        ) {
-          results.push({
-            type: 'collection',
-            name: coll.name,
-            project: coll.project,
-            namespace: coll.name,
-            description: coll.description,
-          });
-        }
-      }
-
-      if (!includeAssets) return results;
-
       const searchProjects = project
         ? [project]
-        : [...new Set(targetCollections.map((c) => c.project))];
+        : collections.map((c) => c.project).filter((v, i, a) => a.indexOf(v) === i);
+
+      const results: SearchResult[] = [];
 
       for (const proj of searchProjects) {
-        const projCollections = targetCollections.filter((c) => c.project === proj);
-        for (const coll of projCollections) {
-          try {
-            const tablesResp = await fetchJson<ListTablesResponse>(
-              `${namespacePath(proj, coll.name)}/tables`,
-            );
-            for (const id of tablesResp.identifiers || []) {
-              try {
-                const detail = await fetchJson<LoadTableResult>(
-                  `${namespacePath(proj, coll.name)}/tables/${id.name}`,
-                );
-                const props = detail.metadata?.properties || {};
-                const desc = props.description || '';
-                const name = id.name;
-                const tagMatch = Object.entries(props).some(
-                  ([k, v]) => k.toLowerCase().includes(q) || String(v).toLowerCase().includes(q),
-                );
-                if (name.toLowerCase().includes(q) || desc.toLowerCase().includes(q) || tagMatch) {
-                  results.push({
-                    type: 'table',
-                    name,
-                    project: proj,
-                    namespace: coll.name,
-                    description: desc,
-                    format: props.format,
-                    location: detail.metadata?.location,
-                    connectionRef: props['connection-ref'],
-                    tags: props,
-                  });
-                }
-              } catch { /* skip */ }
-            }
-          } catch { /* skip */ }
-
-          try {
-            const volResp = await fetchJson<ListVolumesResponse>(
-              `${namespacePath(proj, coll.name)}/volumes`,
-            );
-            for (const vol of volResp.volumes || []) {
-              const desc = vol.comment || '';
-              const volProps = vol.properties || {};
-              const volTagMatch = Object.entries(volProps).some(
-                ([k, v]) => k.toLowerCase().includes(q) || String(v).toLowerCase().includes(q),
-              );
-              if (vol.name.toLowerCase().includes(q) || desc.toLowerCase().includes(q) || volTagMatch) {
-                results.push({
-                  type: 'volume',
-                  name: vol.name,
-                  project: proj,
-                  namespace: coll.name,
-                  description: desc,
-                  location: vol['storage-location'],
-                  connectionRef: vol.properties?.['connection-ref'],
-                  tags: vol.properties,
-                });
-              }
-            }
-          } catch { /* skip */ }
-        }
+        try {
+          const data = await fetchJson<ServerSearchResponse>(
+            `${catalogPath(proj)}/search?query=${encodeURIComponent(query)}`,
+          );
+          for (const item of data.results) {
+            results.push({
+              type: item.type,
+              name: item.name,
+              project: item.project || proj,
+              namespace: item.namespace?.[0] || '',
+              description: item.description || '',
+              format: item.properties?.format,
+              location: item.properties?.location,
+              connectionRef: item.properties?.['connection-ref'],
+              tags: item.properties,
+            });
+          }
+        } catch { /* skip inaccessible projects */ }
       }
 
       return results;
     },
-    enabled: query.length >= 2 && collections.length > 0,
+    enabled: query.length >= 2 && (!!project || collections.length > 0),
     staleTime: 30000,
   });
 }

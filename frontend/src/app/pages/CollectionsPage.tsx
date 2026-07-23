@@ -145,13 +145,18 @@ const CollectionsPage: React.FC = () => {
     setProjectFilter('');
   };
 
-  const EXCLUDED_PROJECTS = new Set(['default', 'system', 'openshift', 'opendatahub']);
+  const DASHBOARD_NAMESPACE = 'redhat-ods-applications';
   const filteredNamespaces = React.useMemo(() => {
     const visible = namespaces.filter(
       (ns) =>
-        !ns.name.startsWith('openshift-') &&
-        !ns.name.startsWith('kube-') &&
-        !EXCLUDED_PROJECTS.has(ns.name),
+        !(
+          ns.name.startsWith('openshift-') ||
+          ns.name.startsWith('kube-') ||
+          ns.name === 'default' ||
+          ns.name === 'system' ||
+          ns.name === 'openshift' ||
+          ns.name === DASHBOARD_NAMESPACE
+        ),
     );
     if (!projectFilter) return visible;
     const q = projectFilter.toLowerCase();

@@ -5,6 +5,7 @@ import { NavDataItem } from '~/app/standalone/types';
 import useUser from './hooks/useUser';
 import MainPage from './pages/MainPage';
 import SettingsMainPage from './pages/SettingsMainPage';
+import DataHubWrapper from '../odh/DataHubWrapper';
 
 export const useAdminSettings = (): NavDataItem[] => {
   const { clusterAdmin } = useUser();
@@ -24,6 +25,10 @@ export const useAdminSettings = (): NavDataItem[] => {
 export const useNavData = (): NavDataItem[] => {
   const baseNavItems = [
     {
+      label: 'Data Registry',
+      path: '/ai-hub/data/collections',
+    },
+    {
       label: 'Main View',
       path: '/main-view',
     },
@@ -37,10 +42,10 @@ const AppRoutes: React.FC = () => {
 
   return (
     <Routes>
-      <Route path="/" element={<Navigate to="/main-view" replace />} />
+      <Route path="/" element={<Navigate to="/ai-hub/data/collections" replace />} />
+      <Route path="/ai-hub/data/*" element={<DataHubWrapper />} />
       <Route path="/main-view/*" element={<MainPage />} />
       <Route path="*" element={<NotFound />} />
-      {/* TODO: [Conditional render] Follow up add testing and conditional rendering when in standalone mode */}
       {clusterAdmin && <Route path="/main-view-settings/*" element={<SettingsMainPage />} />}
     </Routes>
   );

@@ -35,6 +35,8 @@ import {
   Form,
   FormGroup,
   TextInput,
+  Checkbox,
+  Divider,
 } from '@patternfly/react-core';
 import { Table, Thead, Tr, Th, Tbody, Td } from '@patternfly/react-table';
 import {
@@ -71,9 +73,11 @@ const CollectionsPage: React.FC = () => {
   const activeTab = searchParams.get('tab') || 'collections';
   const selectedProject = searchParams.get('project') || '';
   const [filterValue, setFilterValue] = React.useState('');
+  const [includeAssets, setIncludeAssets] = React.useState(true);
   const navigate = useNavigate();
 
   const [isProjectOpen, setIsProjectOpen] = React.useState(false);
+  const [projectFilter, setProjectFilter] = React.useState('');
   const [showCreateCollection, setShowCreateCollection] = React.useState(false);
   const [newCollectionName, setNewCollectionName] = React.useState('');
   const [deleteTarget, setDeleteTarget] = React.useState<string | null>(null);
@@ -106,7 +110,11 @@ const CollectionsPage: React.FC = () => {
     isSearchActive ? filterValue : '',
     true,
   );
-  const searchResults = searchQuery.data || [];
+  const allSearchResults = searchQuery.data || [];
+  const searchResults = React.useMemo(() => {
+    if (includeAssets) return allSearchResults;
+    return allSearchResults.filter((r) => r.type === 'collection');
+  }, [allSearchResults, includeAssets]);
 
   const filteredCollections = React.useMemo(() => {
     if (!filterValue) return collections;
@@ -134,7 +142,14 @@ const CollectionsPage: React.FC = () => {
     if (value && value !== '__all__') params.project = String(value);
     setSearchParams(params);
     setIsProjectOpen(false);
+    setProjectFilter('');
   };
+
+  const filteredNamespaces = React.useMemo(() => {
+    if (!projectFilter) return namespaces;
+    const q = projectFilter.toLowerCase();
+    return namespaces.filter((ns) => ns.name.toLowerCase().includes(q));
+  }, [namespaces, projectFilter]);
 
   const handleDeleteCollection = async () => {
     if (!deleteTarget) return;
@@ -179,7 +194,7 @@ const CollectionsPage: React.FC = () => {
                       isOpen={isProjectOpen}
                       selected={activeProject || '__all__'}
                       onSelect={handleProjectChange}
-                      onOpenChange={(open) => setIsProjectOpen(open)}
+                      onOpenChange={(open) => { setIsProjectOpen(open); if (!open) setProjectFilter(''); }}
                       toggle={(toggleRef) => (
                         <MenuToggle
                           ref={toggleRef}
@@ -192,11 +207,21 @@ const CollectionsPage: React.FC = () => {
                         </MenuToggle>
                       )}
                     >
+                      <div style={{ padding: '8px' }}>
+                        <SearchInput
+                          placeholder="Project name"
+                          value={projectFilter}
+                          onChange={(_event, value) => setProjectFilter(value)}
+                          onClear={() => setProjectFilter('')}
+                          aria-label="Filter projects"
+                        />
+                      </div>
+                      <Divider />
                       <SelectList>
                         <SelectOption key="__all__" value="__all__">
                           All projects
                         </SelectOption>
-                        {namespaces.map((ns) => (
+                        {filteredNamespaces.map((ns) => (
                           <SelectOption key={ns.name} value={ns.name}>
                             {ns.name}
                           </SelectOption>
@@ -204,6 +229,13 @@ const CollectionsPage: React.FC = () => {
                       </SelectList>
                     </Select>
                 </FlexItem>
+                {activeProject && (
+                  <FlexItem>
+                    <Link to={`/ai-hub/data/collections?project=${activeProject}&tab=collections`} style={{ fontSize: '14px' }}>
+                      Go to <FolderIcon style={{ marginLeft: '2px', marginRight: '2px' }} /> <strong>{activeProject}</strong>
+                    </Link>
+                  </FlexItem>
+                )}
               </Flex>
             </ToolbarItem>
           </ToolbarContent>
@@ -225,7 +257,14 @@ const CollectionsPage: React.FC = () => {
                       onClear={() => setFilterValue('')}
                     />
                   </ToolbarItem>
-                  
+                  <ToolbarItem>
+                    <Checkbox
+                      id="include-assets"
+                      label="Include Tables/Volumes"
+                      isChecked={includeAssets}
+                      onChange={(_event, checked) => setIncludeAssets(checked)}
+                    />
+                  </ToolbarItem>
                   <ToolbarItem>
                     <Label color="blue" isCompact>
                       {showSearchResults

@@ -86,6 +86,17 @@ module.exports = smp.wrap(
         open: false,
         proxy: [
           {
+            context: ['/data-hub/api'],
+            target: {
+              host: PROXY_HOST,
+              protocol: PROXY_PROTOCOL,
+              port: PROXY_PORT,
+            },
+            changeOrigin: true,
+            headers: getProxyHeaders(),
+            pathRewrite: { '^/data-hub': '' },
+          },
+          {
             context: ['/api', '/mod-arch/api'],
             target: {
               host: PROXY_HOST,

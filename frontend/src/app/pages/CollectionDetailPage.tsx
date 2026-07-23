@@ -79,17 +79,32 @@ const CollectionDetailPage: React.FC = () => {
   const filteredTables = React.useMemo(() => {
     if (!tableFilter) return tables;
     const q = tableFilter.toLowerCase();
-    return tables.filter(
-      (t) => t.name.toLowerCase().includes(q) || t.description.toLowerCase().includes(q),
-    );
+    return tables.filter((t) => {
+      if (t.name.toLowerCase().includes(q)) return true;
+      if (t.description.toLowerCase().includes(q)) return true;
+      if (t.format.toLowerCase().includes(q)) return true;
+      if (t.location.toLowerCase().includes(q)) return true;
+      if (t.connectionRef.toLowerCase().includes(q)) return true;
+      if (t.volumeType.toLowerCase().includes(q)) return true;
+      return Object.entries(t.tags).some(
+        ([k, v]) => k.toLowerCase().includes(q) || String(v).toLowerCase().includes(q),
+      );
+    });
   }, [tables, tableFilter]);
 
   const filteredVolumes = React.useMemo(() => {
     if (!volumeFilter) return volumes;
     const q = volumeFilter.toLowerCase();
-    return volumes.filter(
-      (v) => v.name.toLowerCase().includes(q) || v.description.toLowerCase().includes(q),
-    );
+    return volumes.filter((v) => {
+      if (v.name.toLowerCase().includes(q)) return true;
+      if (v.description.toLowerCase().includes(q)) return true;
+      if (v.location.toLowerCase().includes(q)) return true;
+      if (v.connectionRef.toLowerCase().includes(q)) return true;
+      if (v.volumeType.toLowerCase().includes(q)) return true;
+      return Object.entries(v.tags).some(
+        ([k, v]) => k.toLowerCase().includes(q) || String(v).toLowerCase().includes(q),
+      );
+    });
   }, [volumes, volumeFilter]);
 
   const handleDeleteTable = async () => {

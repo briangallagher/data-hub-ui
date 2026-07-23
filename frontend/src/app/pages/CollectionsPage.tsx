@@ -145,10 +145,17 @@ const CollectionsPage: React.FC = () => {
     setProjectFilter('');
   };
 
+  const EXCLUDED_PROJECTS = new Set(['default', 'system', 'openshift', 'opendatahub']);
   const filteredNamespaces = React.useMemo(() => {
-    if (!projectFilter) return namespaces;
+    const visible = namespaces.filter(
+      (ns) =>
+        !ns.name.startsWith('openshift-') &&
+        !ns.name.startsWith('kube-') &&
+        !EXCLUDED_PROJECTS.has(ns.name),
+    );
+    if (!projectFilter) return visible;
     const q = projectFilter.toLowerCase();
-    return namespaces.filter((ns) => ns.name.toLowerCase().includes(q));
+    return visible.filter((ns) => ns.name.toLowerCase().includes(q));
   }, [namespaces, projectFilter]);
 
   const handleDeleteCollection = async () => {

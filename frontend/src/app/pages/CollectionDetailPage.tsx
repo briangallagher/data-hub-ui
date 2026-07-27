@@ -25,11 +25,12 @@ import {
   ModalFooter,
 } from '@patternfly/react-core';
 import { Table, Thead, Tr, Th, Tbody, Td } from '@patternfly/react-table';
-import { TrashIcon, PencilAltIcon } from '@patternfly/react-icons';
+import { TrashIcon, PencilAltIcon, DatabaseIcon } from '@patternfly/react-icons';
 import { useParams, Link, useSearchParams } from 'react-router-dom';
-import { useTablesAndVolumes, useConnections, useDeleteTable, useDeleteVolume } from './useCatalogApi';
+import { useTablesAndVolumes, useConnections, useDeleteTable, useDeleteVolume, useDatabases, useDeleteDatabase, DatabaseAsset } from './useCatalogApi';
 import RegisterTableModal from './RegisterTableModal';
 import RegisterVolumeModal from './RegisterVolumeModal';
+import RegisterDatabaseModal from './RegisterDatabaseModal';
 import EditTableModal from './EditTableModal';
 import EditVolumeModal from './EditVolumeModal';
 
@@ -61,8 +62,14 @@ const CollectionDetailPage: React.FC = () => {
 
   const [tableFilter, setTableFilter] = React.useState('');
   const [volumeFilter, setVolumeFilter] = React.useState('');
+  const databasesQuery = useDatabases(project, namespace);
+  const databases = databasesQuery.data || [];
+  const deleteDatabase = useDeleteDatabase();
+
   const [showRegisterTable, setShowRegisterTable] = React.useState(false);
   const [showRegisterVolume, setShowRegisterVolume] = React.useState(false);
+  const [showRegisterDatabase, setShowRegisterDatabase] = React.useState(false);
+  const [deleteDatabaseTarget, setDeleteDatabaseTarget] = React.useState<string | null>(null);
   const [deleteTableTarget, setDeleteTableTarget] = React.useState<string | null>(null);
   const [deleteVolumeTarget, setDeleteVolumeTarget] = React.useState<string | null>(null);
   const [editTableTarget, setEditTableTarget] = React.useState<string | null>(null);
@@ -193,16 +200,15 @@ const CollectionDetailPage: React.FC = () => {
                 <Th>Name</Th>
                 <Th>Description</Th>
                 <Th>Format</Th>
-                <Th>Type</Th>
+                <Th>Schema</Th>
                 <Th>Storage location</Th>
                 <Th>Connection</Th>
-                <Th>Tags</Th>
+                <Th>Properties</Th>
                 <Th>Actions</Th>
               </Tr>
             </Thead>
             <Tbody>
               {filteredTables.map((table) => {
-                const displayTags = getDisplayTags(table.tags);
                 const formatColor = FORMAT_COLORS[table.format?.toLowerCase()] || 'grey';
                 return (
                   <Tr key={table.name}>
@@ -219,10 +225,10 @@ const CollectionDetailPage: React.FC = () => {
                         </Label>
                       ) : '—'}
                     </Td>
-                    <Td dataLabel="Type">
-                      <Label isCompact color="grey">
-                        {table.volumeType || 'MANAGED'}
-                      </Label>
+                    <Td dataLabel="Schema">
+                      {table.columns && table.columns.length > 0 ? (
+                        <Label isCompact color="cyan">{table.columns.length} columns</Label>
+                      ) : '—'}
                     </Td>
                     <Td dataLabel="Storage location">
                       <span
@@ -237,16 +243,12 @@ const CollectionDetailPage: React.FC = () => {
                         <Label isCompact color="blue">{table.connectionRef}</Label>
                       ) : '—'}
                     </Td>
-                    <Td dataLabel="Tags">
-                      {displayTags.length > 0 ? (
-                        <LabelGroup numLabels={3}>
-                          {displayTags.map((tag) => (
-                            <Label key={tag.key} isCompact color="teal">
-                              {tag.key}: {tag.value}
-                            </Label>
-                          ))}
-                        </LabelGroup>
-                      ) : '—'}
+                    <Td dataLabel="Properties">
+                      <LabelGroup numLabels={4}>
+                        {table.properties?.maturity && <Label isCompact color="green">{table.properties.maturity}</Label>}
+                        {table.properties?.domain && <Label isCompact color="blue">{table.properties.domain}</Label>}
+                        {table.properties?.pii === 'true' && <Label isCompact color="red">PII</Label>}
+                      </LabelGroup>
                     </Td>
                     <Td dataLabel="Actions">
                       <Button
@@ -319,7 +321,6 @@ const CollectionDetailPage: React.FC = () => {
               <Tr>
                 <Th>Name</Th>
                 <Th>Description</Th>
-                <Th>Type</Th>
                 <Th>Storage location</Th>
                 <Th>Connection</Th>
                 <Th>Tags</Th>
@@ -336,11 +337,6 @@ const CollectionDetailPage: React.FC = () => {
                       <span style={{ fontSize: '13px', color: '#6a6e73' }}>
                         {vol.description || '—'}
                       </span>
-                    </Td>
-                    <Td dataLabel="Type">
-                      <Label isCompact color="green">
-                        {vol.volumeType || 'EXTERNAL'}
-                      </Label>
                     </Td>
                     <Td dataLabel="Storage location">
                       <span
@@ -394,6 +390,97 @@ const CollectionDetailPage: React.FC = () => {
         </Card>
       </PageSection>
 
+      <PageSection>
+        <Card>
+          <CardBody>
+            <Title headingLevel="h2" size="xl" style={{ marginBottom: '16px' }}>
+              Databases
+            </Title>
+            <Toolbar>
+              <ToolbarContent>
+                <ToolbarGroup align={{ default: 'alignEnd' }}>
+                  <ToolbarItem>
+                    <Button variant="primary" onClick={() => setShowRegisterDatabase(true)}>
+                      Register database
+                    </Button>
+                  </ToolbarItem>
+                </ToolbarGroup>
+              </ToolbarContent>
+            </Toolbar>
+
+        {databases.length === 0 && (
+            <EmptyState titleText="No databases" icon={DatabaseIcon}>
+              <EmptyStateBody>
+                No databases registered in this collection yet. Register a PostgreSQL, MySQL, or other database to make it discoverable.
+              </EmptyStateBody>
+            </EmptyState>
+        )}
+
+        {databases.length > 0 && (
+          <Table aria-label="Databases" variant="compact">
+            <Thead>
+              <Tr>
+                <Th>Name</Th>
+                <Th>Type</Th>
+                <Th>Host</Th>
+                <Th>Database</Th>
+                <Th>Schemas</Th>
+                <Th>Connection</Th>
+                <Th>Description</Th>
+                <Th>Actions</Th>
+              </Tr>
+            </Thead>
+            <Tbody>
+              {databases.map((db) => (
+                <Tr key={db.name}>
+                  <Td dataLabel="Name">{db.name}</Td>
+                  <Td dataLabel="Type">
+                    <Label isCompact color="purple" icon={<DatabaseIcon />}>{db.db_type}</Label>
+                  </Td>
+                  <Td dataLabel="Host">
+                    <span style={{ fontSize: '13px' }}>{db.host}</span>
+                  </Td>
+                  <Td dataLabel="Database">
+                    <span style={{ fontSize: '13px' }}>{db.database}</span>
+                  </Td>
+                  <Td dataLabel="Schemas">
+                    {db.schemas && db.schemas.length > 0 ? (
+                      <LabelGroup numLabels={3}>
+                        {db.schemas.map((s) => (
+                          <Label key={s} isCompact color="grey">{s}</Label>
+                        ))}
+                      </LabelGroup>
+                    ) : '—'}
+                  </Td>
+                  <Td dataLabel="Connection">
+                    {db.connection_ref ? (
+                      <Label isCompact color="blue">{db.connection_ref}</Label>
+                    ) : '—'}
+                  </Td>
+                  <Td dataLabel="Description">
+                    <span style={{ fontSize: '13px', color: '#6a6e73' }}>
+                      {db.description || '—'}
+                    </span>
+                  </Td>
+                  <Td dataLabel="Actions">
+                    <Button
+                      variant="plain"
+                      aria-label="Delete"
+                      onClick={() => setDeleteDatabaseTarget(db.name)}
+                      style={{ padding: '4px' }}
+                    >
+                      <TrashIcon />
+                    </Button>
+                  </Td>
+                </Tr>
+              ))}
+            </Tbody>
+          </Table>
+        )}
+          </CardBody>
+        </Card>
+      </PageSection>
+
       {showRegisterTable && (
         <RegisterTableModal
           project={project}
@@ -409,6 +496,15 @@ const CollectionDetailPage: React.FC = () => {
           namespace={namespace}
           connections={connections}
           onClose={() => setShowRegisterVolume(false)}
+        />
+      )}
+
+      {showRegisterDatabase && (
+        <RegisterDatabaseModal
+          project={project}
+          namespace={namespace}
+          connections={connections}
+          onClose={() => setShowRegisterDatabase(false)}
         />
       )}
 

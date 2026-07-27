@@ -1,45 +1,78 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 
-const CATALOG_BASE = '/data-hub/api/catalog';
+const PROXY_BASE = '/data-hub/api/catalog';
 const BFF_BASE = '/data-hub/api/v1';
+const CATALOG_API = `${PROXY_BASE}/catalog`;
+const ICEBERG_API = `${PROXY_BASE}/v1`;
 
 function catalogPath(project: string) {
-  return `${CATALOG_BASE}/v1/${project}`;
+  return `${CATALOG_API}/projects/${project}`;
+}
+
+function collectionPath(project: string, collection: string) {
+  return `${catalogPath(project)}/collections/${collection}`;
+}
+
+// Legacy Iceberg REST paths (used by useUpdateTable — Iceberg-specific operations)
+function icebergPath(project: string) {
+  return `${ICEBERG_API}/${project}`;
 }
 
 function namespacePath(project: string, collection: string) {
-  return `${catalogPath(project)}/namespaces/${collection}`;
+  return `${icebergPath(project)}/namespaces/${collection}`;
 }
 
-interface ListNamespacesResponse {
-  namespaces: string[][];
-  'next-page-token'?: string | null;
-}
+// --- Catalog API Response Interfaces ---
 
-interface TableIdentifier {
-  namespace: string[];
+interface CatalogCollection {
   name: string;
+  description: string;
+  table_count: number;
+  volume_count: number;
+  database_count?: number;
+  created_date?: string;
+  properties?: Record<string, string>;
 }
 
-interface ListTablesResponse {
-  identifiers: TableIdentifier[];
-  'next-page-token'?: string | null;
+interface CatalogCollectionsResponse {
+  collections: CatalogCollection[];
 }
 
-interface TableMetadata {
-  'format-version': number;
-  'table-uuid': string;
-  location: string;
-  schemas: any[];
-  'current-schema-id': number;
-  properties: Record<string, string>;
+interface CatalogAsset {
+  name: string;
+  asset_type: string;
+  format?: string;
+  volume_type?: string;
+  location?: string;
+  connection_ref?: string;
+  description?: string;
+  tags?: Record<string, string>;
+  properties?: Record<string, string>;
+  uuid?: string;
+  collection?: string;
+  columns?: Array<{name: string; type: string; nullable?: boolean; description?: string}>;
 }
 
-interface LoadTableResult {
-  'metadata-location': string;
-  metadata: TableMetadata;
-  config: Record<string, string>;
+interface CatalogAssetsResponse {
+  assets: CatalogAsset[];
 }
+
+interface CatalogDatabaseAsset {
+  name: string;
+  asset_type: string;
+  db_type: string;
+  host: string;
+  database: string;
+  schemas: string[];
+  connection_ref: string;
+  description: string;
+}
+
+interface CatalogDatabasesResponse {
+  assets: CatalogDatabaseAsset[];
+}
+
+// --- Exported Interfaces ---
 
 export interface ProjectInfo {
   name: string;
@@ -57,7 +90,7 @@ export interface CollectionInfo {
 }
 
 export interface SearchResult {
-  type: 'collection' | 'table' | 'volume';
+  type: 'collection' | 'table' | 'volume' | 'database';
   name: string;
   project: string;
   namespace: string;
@@ -77,8 +110,22 @@ export interface TableAsset {
   location: string;
   connectionRef: string;
   tags: Record<string, string>;
+  properties: Record<string, string>;
   uuid: string;
   isVolume: boolean;
+  columns?: Array<{name: string; type: string; nullable?: boolean; description?: string}>;
+}
+
+export interface DatabaseAsset {
+  name: string;
+  asset_type: 'database';
+  db_type: string;       // postgresql, mysql, snowflake, etc.
+  host: string;
+  database: string;
+  schemas: string[];
+  connection_ref: string;
+  description: string;
+  collection: string;
 }
 
 export interface DataConnection {
@@ -90,6 +137,8 @@ export interface DataConnection {
   region: string;
   namespace?: string;
 }
+
+// --- Fetch Helpers ---
 
 async function fetchJson<T>(url: string): Promise<T> {
   const resp = await fetch(url, {
@@ -158,7 +207,7 @@ export function useProjects() {
   return useQuery({
     queryKey: ['catalog', 'projects'],
     queryFn: async (): Promise<ProjectInfo[]> => {
-      const data = await fetchJson<ProjectsResponse>(`${CATALOG_BASE}/projects`);
+      const data = await fetchJson<ProjectsResponse>(`${PROXY_BASE}/v1/projects`);
       return (data.projects || []).map((p) => ({
         name: p.spec.name,
         createdTimestamp: p.meta?.createdTimestamp,
@@ -187,103 +236,34 @@ export function useK8sNamespaces() {
   });
 }
 
-// --- Namespaces (collections within a project) ---
+// --- Namespaces / Collections within a project (Catalog API) ---
 
 export function useNamespaces(project: string) {
   return useQuery({
     queryKey: ['catalog', 'namespaces', project],
-    queryFn: () => fetchJson<ListNamespacesResponse>(`${catalogPath(project)}/namespaces`),
+    queryFn: () => fetchJson<CatalogCollectionsResponse>(`${catalogPath(project)}/collections`),
     enabled: !!project,
   });
 }
 
-interface VolumeInfo {
-  name: string;
-  'catalog-name': string;
-  'schema-name': string;
-  'volume-type': string;
-  'storage-location': string;
-  comment: string;
-  owner: string | null;
-  'created-at': number;
-  'updated-at': number;
-  properties: Record<string, string>;
-}
-
-interface ListVolumesResponse {
-  volumes: VolumeInfo[];
-}
-
 export function useCollections(project: string) {
-  const namespacesQuery = useNamespaces(project);
-
   return useQuery({
     queryKey: ['catalog', 'collections', project],
     queryFn: async (): Promise<CollectionInfo[]> => {
-      const namespaces = namespacesQuery.data?.namespaces || [];
-      const collections: CollectionInfo[] = [];
-
-      // Fetch namespace properties (shared at project level) for descriptions
-      let nsProps: Record<string, string> = {};
-      if (namespaces.length > 0) {
-        try {
-          const nsDetail = await fetchJson<{ namespace: string[]; properties: Record<string, string> }>(
-            `${catalogPath(project)}/namespaces/${namespaces[0][0]}`,
-          );
-          nsProps = nsDetail.properties || {};
-        } catch { /* no props */ }
-      }
-
-      for (const ns of namespaces) {
-        const nsName = ns[0];
-        if (!nsName) continue;
-
-        const description = nsProps[`desc.${nsName}`] || '';
-
-        let tableCount = 0;
-        let volumeCount = 0;
-        let createdDate = '';
-        try {
-          const tablesResp = await fetchJson<ListTablesResponse>(
-            `${namespacePath(project, nsName)}/tables`,
-          );
-          const filtered = (tablesResp.identifiers || []).filter(
-            (id) => !id.namespace || id.namespace[0] === nsName,
-          );
-          tableCount = filtered.length;
-        } catch {
-          // empty
-        }
-        try {
-          const volumesResp = await fetchJson<ListVolumesResponse>(
-            `${namespacePath(project, nsName)}/volumes`,
-          );
-          const filteredVols = (volumesResp.volumes || []).filter(
-            (v) => !v['schema-name'] || v['catalog-name'] === nsName || v['schema-name'] === nsName,
-          );
-          volumeCount = filteredVols.length;
-          if (filteredVols.length > 0) {
-            const ts = filteredVols[0]['created-at'];
-            if (ts) createdDate = new Date(ts).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
-          }
-        } catch {
-          // no volumes
-        }
-
-        collections.push({
-          name: nsName,
-          project,
-          description,
-          tableCount,
-          volumeCount,
-          createdDate,
-          properties: nsProps,
-        });
-      }
-
-      return collections;
+      const data = await fetchJson<CatalogCollectionsResponse>(
+        `${catalogPath(project)}/collections`,
+      );
+      return (data.collections || []).map((c) => ({
+        name: c.name,
+        project,
+        description: c.description || '',
+        tableCount: c.table_count || 0,
+        volumeCount: c.volume_count || 0,
+        createdDate: c.created_date || '',
+        properties: c.properties || {},
+      }));
     },
-    enabled: !!project && !!namespacesQuery.data,
+    enabled: !!project,
   });
 }
 
@@ -299,20 +279,18 @@ export function useAllProjectsCollections(projects: ProjectInfo[]) {
 
       for (const projectName of projectNames) {
         try {
-          const nsResp = await fetchJson<ListNamespacesResponse>(
-            `${catalogPath(projectName)}/namespaces`,
+          const data = await fetchJson<CatalogCollectionsResponse>(
+            `${catalogPath(projectName)}/collections`,
           );
-          for (const ns of nsResp.namespaces || []) {
-            const nsName = ns[0];
-            if (!nsName) continue;
+          for (const c of data.collections || []) {
             allCollections.push({
-              name: nsName,
+              name: c.name,
               project: projectName,
-              description: '',
-              tableCount: 0,
-              volumeCount: 0,
-              createdDate: '',
-              properties: {},
+              description: c.description || '',
+              tableCount: c.table_count || 0,
+              volumeCount: c.volume_count || 0,
+              createdDate: c.created_date || '',
+              properties: c.properties || {},
             });
           }
         } catch { /* skip inaccessible projects */ }
@@ -328,7 +306,7 @@ export function useAllProjectsCollections(projects: ProjectInfo[]) {
 // --- Server-side Search ---
 
 interface ServerSearchResult {
-  type: 'collection' | 'table' | 'volume';
+  type: 'collection' | 'table' | 'volume' | 'database';
   namespace: string[];
   name: string;
   description: string | null;
@@ -354,41 +332,29 @@ export function useSearchAssets(
   return useQuery({
     queryKey: ['catalog', 'search', project, query],
     queryFn: async (): Promise<SearchResult[]> => {
-      const searchProjects = project
-        ? [project]
-        : collections.map((c) => c.project).filter((v, i, a) => a.indexOf(v) === i);
+      const url = project
+        ? `${catalogPath(project)}/search?query=${encodeURIComponent(query)}`
+        : `${CATALOG_API}/search?query=${encodeURIComponent(query)}`;
 
-      const results: SearchResult[] = [];
-
-      for (const proj of searchProjects) {
-        try {
-          const data = await fetchJson<ServerSearchResponse>(
-            `${catalogPath(proj)}/search?query=${encodeURIComponent(query)}`,
-          );
-          for (const item of data.results) {
-            results.push({
-              type: item.type,
-              name: item.name,
-              project: item.project || proj,
-              namespace: item.namespace?.[0] || '',
-              description: item.description || '',
-              format: item.properties?.format,
-              location: item.properties?.location,
-              connectionRef: item.properties?.['connection-ref'],
-              tags: item.properties,
-            });
-          }
-        } catch { /* skip inaccessible projects */ }
-      }
-
-      return results;
+      const data = await fetchJson<ServerSearchResponse>(url);
+      return (data.results || []).map((item) => ({
+        type: item.type,
+        name: item.name,
+        project: item.project || project,
+        namespace: item.namespace?.[0] || '',
+        description: item.description || '',
+        format: item.properties?.format,
+        location: item.properties?.location,
+        connectionRef: item.properties?.['connection-ref'],
+        tags: item.properties,
+      }));
     },
     enabled: query.length >= 2 && (!!project || collections.length > 0),
     staleTime: 30000,
   });
 }
 
-// --- Tables & Volumes ---
+// --- Tables & Volumes (Catalog API) ---
 
 export function useTablesAndVolumes(project: string, namespace: string) {
   return useQuery({
@@ -396,59 +362,46 @@ export function useTablesAndVolumes(project: string, namespace: string) {
     queryFn: async (): Promise<TableAsset[]> => {
       const assets: TableAsset[] = [];
 
+      // Fetch tables via Catalog API
       try {
-        const tablesResp = await fetchJson<ListTablesResponse>(
-          `${namespacePath(project, namespace)}/tables`,
+        const tablesResp = await fetchJson<CatalogAssetsResponse>(
+          `${collectionPath(project, namespace)}/tables`,
         );
-        const filtered = (tablesResp.identifiers || []).filter(
-          (id) => !id.namespace || id.namespace[0] === namespace,
-        );
-        for (const id of filtered) {
-          try {
-            const detail = await fetchJson<LoadTableResult>(
-              `${namespacePath(project, namespace)}/tables/${id.name}`,
-            );
-            const props = detail.metadata?.properties || {};
-            assets.push({
-              name: id.name,
-              namespace: id.namespace?.[0] || namespace,
-              description: props.description || '',
-              format: props.format || '',
-              volumeType: props.volume_type || 'MANAGED',
-              location: detail.metadata?.location || '',
-              connectionRef: props['connection-ref'] || props['connection_ref'] || '',
-              tags: props,
-              uuid: detail.metadata?.['table-uuid'] || '',
-              isVolume: false,
-            });
-          } catch {
-            assets.push({
-              name: id.name, namespace: id.namespace?.[0] || namespace,
-              description: '', format: '', volumeType: 'MANAGED', location: '',
-              connectionRef: '', tags: {}, uuid: '', isVolume: false,
-            });
-          }
+        for (const a of tablesResp.assets || []) {
+          assets.push({
+            name: a.name,
+            namespace,
+            description: a.description || '',
+            format: a.format || '',
+            volumeType: a.volume_type || 'MANAGED',
+            location: a.location || '',
+            connectionRef: a.connection_ref || '',
+            tags: a.tags || {},
+            properties: a.properties || {},
+            uuid: a.uuid || '',
+            isVolume: false,
+            columns: a.columns || [],
+          });
         }
       } catch { /* no tables */ }
 
+      // Fetch volumes via Catalog API
       try {
-        const volumesResp = await fetchJson<ListVolumesResponse>(
-          `${namespacePath(project, namespace)}/volumes`,
+        const volumesResp = await fetchJson<CatalogAssetsResponse>(
+          `${collectionPath(project, namespace)}/volumes`,
         );
-        const filteredVols = (volumesResp.volumes || []).filter(
-          (v) => v['schema-name'] === namespace || !v['schema-name'],
-        );
-        for (const vol of filteredVols) {
+        for (const a of volumesResp.assets || []) {
           assets.push({
-            name: vol.name,
-            namespace: namespace,
-            description: vol.comment || '',
-            format: '',
-            volumeType: vol['volume-type'] || 'EXTERNAL',
-            location: vol['storage-location'] || '',
-            connectionRef: vol.properties?.['connection-ref'] || '',
-            tags: vol.properties || {},
-            uuid: '',
+            name: a.name,
+            namespace,
+            description: a.description || '',
+            format: a.format || '',
+            volumeType: a.volume_type || 'EXTERNAL',
+            location: a.location || '',
+            connectionRef: a.connection_ref || '',
+            tags: a.tags || {},
+            properties: a.properties || {},
+            uuid: a.uuid || '',
             isVolume: true,
           });
         }
@@ -463,12 +416,37 @@ export function useTablesAndVolumes(project: string, namespace: string) {
 export function useTableDetail(project: string, namespace: string, name: string) {
   return useQuery({
     queryKey: ['catalog', 'table-detail', project, namespace, name],
-    queryFn: () => fetchJson<LoadTableResult>(`${namespacePath(project, namespace)}/tables/${name}`),
+    queryFn: () => fetchJson<CatalogAsset>(`${collectionPath(project, namespace)}/tables/${name}`),
     enabled: !!project && !!namespace && !!name,
   });
 }
 
-// --- Connections ---
+// --- Databases (Catalog API) ---
+
+export function useDatabases(project: string, collection: string) {
+  return useQuery({
+    queryKey: ['catalog', 'databases', project, collection],
+    queryFn: async (): Promise<DatabaseAsset[]> => {
+      const data = await fetchJson<CatalogDatabasesResponse>(
+        `${collectionPath(project, collection)}/databases`,
+      );
+      return (data.assets || []).map((a) => ({
+        name: a.name,
+        asset_type: 'database' as const,
+        db_type: a.db_type || '',
+        host: a.host || '',
+        database: a.database || '',
+        schemas: a.schemas || [],
+        connection_ref: a.connection_ref || '',
+        description: a.description || '',
+        collection,
+      }));
+    },
+    enabled: !!project && !!collection,
+  });
+}
+
+// --- Connections (BFF — unchanged) ---
 
 export function useConnections(namespace: string) {
   return useQuery({
@@ -486,7 +464,7 @@ export function useConnections(namespace: string) {
   });
 }
 
-// --- Create Table/Volume ---
+// --- Create Table (Catalog API) ---
 
 interface CreateTablePayload {
   project: string;
@@ -499,6 +477,8 @@ interface CreateTablePayload {
   connectionRef: string;
   tags: Record<string, string>;
   isVolume: boolean;
+  schemaFields?: Array<{name: string; type: string; nullable: boolean; description?: string}>;
+  properties?: Record<string, string>;
 }
 
 export function useCreateTable() {
@@ -514,17 +494,16 @@ export function useCreateTable() {
 
       const body: any = {
         name: payload.name,
-        schema: {
-          type: 'struct',
-          'schema-id': 0,
-          fields: [],
-        },
+        format: payload.format || 'iceberg',
         location: payload.location || null,
-        properties,
+        connection_ref: payload.connectionRef || null,
+        description: payload.description || null,
+        schema_fields: payload.schemaFields || null,
+        properties: payload.properties || null,
       };
 
       return postJson(
-        `${namespacePath(payload.project, payload.namespace)}/tables`,
+        `${collectionPath(payload.project, payload.namespace)}/tables`,
         body,
       );
     },
@@ -534,6 +513,8 @@ export function useCreateTable() {
     },
   });
 }
+
+// --- Create Volume (Catalog API) ---
 
 export function useCreateVolume() {
   const queryClient = useQueryClient();
@@ -546,14 +527,15 @@ export function useCreateVolume() {
 
       const body: any = {
         name: payload.name,
-        'volume-type': 'EXTERNAL',
-        'storage-location': payload.location || '',
-        comment: payload.description || null,
-        properties,
+        location: payload.location || '',
+        connection_ref: payload.connectionRef || null,
+        description: payload.description || null,
+        content_type: payload.format || null,
+        properties: payload.properties || null,
       };
 
       return postJson(
-        `${namespacePath(payload.project, payload.namespace)}/volumes`,
+        `${collectionPath(payload.project, payload.namespace)}/volumes`,
         body,
       );
     },
@@ -564,14 +546,16 @@ export function useCreateVolume() {
   });
 }
 
+// --- Create Collection (Catalog API) ---
+
 export function useCreateNamespace() {
   const queryClient = useQueryClient();
 
   return useMutation({
     mutationFn: async (payload: { project: string; name: string }) => {
       return postJson(
-        `${catalogPath(payload.project)}/namespaces`,
-        { namespace: [payload.name] },
+        `${catalogPath(payload.project)}/collections`,
+        { name: payload.name },
       );
     },
     onSuccess: async (_data, variables) => {
@@ -583,14 +567,46 @@ export function useCreateNamespace() {
   });
 }
 
-// --- Delete Namespace (Collection) ---
+// --- Create Database (Catalog API) ---
+
+interface CreateDatabasePayload {
+  project: string;
+  collection: string;
+  name: string;
+  db_type: string;
+  host: string;
+  database: string;
+  schemas: string[];
+  connection_ref: string;
+  description: string;
+}
+
+export function useCreateDatabase() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (payload: CreateDatabasePayload) => {
+      const { project, collection, ...body } = payload;
+      return postJson(
+        `${collectionPath(project, collection)}/databases`,
+        body,
+      );
+    },
+    onSuccess: (_data, variables) => {
+      queryClient.invalidateQueries({ queryKey: ['catalog', 'databases', variables.project, variables.collection] });
+      queryClient.invalidateQueries({ queryKey: ['catalog', 'collections', variables.project] });
+    },
+  });
+}
+
+// --- Delete Collection (Catalog API) ---
 
 export function useDeleteNamespace() {
   const queryClient = useQueryClient();
 
   return useMutation({
     mutationFn: async (payload: { project: string; name: string }) => {
-      return deleteRequest(`${catalogPath(payload.project)}/namespaces/${payload.name}`);
+      return deleteRequest(`${collectionPath(payload.project, payload.name)}`);
     },
     onSuccess: (_data, variables) => {
       queryClient.invalidateQueries({ queryKey: ['catalog', 'namespaces', variables.project] });
@@ -599,7 +615,7 @@ export function useDeleteNamespace() {
   });
 }
 
-// --- Delete Table ---
+// --- Delete Table (Catalog API) ---
 
 export function useDeleteTable() {
   const queryClient = useQueryClient();
@@ -607,7 +623,7 @@ export function useDeleteTable() {
   return useMutation({
     mutationFn: async (payload: { project: string; namespace: string; name: string }) => {
       return deleteRequest(
-        `${namespacePath(payload.project, payload.namespace)}/tables/${payload.name}`,
+        `${collectionPath(payload.project, payload.namespace)}/tables/${payload.name}`,
       );
     },
     onSuccess: (_data, variables) => {
@@ -617,7 +633,7 @@ export function useDeleteTable() {
   });
 }
 
-// --- Delete Volume ---
+// --- Delete Volume (Catalog API) ---
 
 export function useDeleteVolume() {
   const queryClient = useQueryClient();
@@ -625,7 +641,7 @@ export function useDeleteVolume() {
   return useMutation({
     mutationFn: async (payload: { project: string; namespace: string; name: string }) => {
       return deleteRequest(
-        `${namespacePath(payload.project, payload.namespace)}/volumes/${payload.name}`,
+        `${collectionPath(payload.project, payload.namespace)}/volumes/${payload.name}`,
       );
     },
     onSuccess: (_data, variables) => {
@@ -635,7 +651,25 @@ export function useDeleteVolume() {
   });
 }
 
-// --- Update Table (set-properties / remove-properties) ---
+// --- Delete Database (Catalog API) ---
+
+export function useDeleteDatabase() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (payload: { project: string; collection: string; name: string }) => {
+      return deleteRequest(
+        `${collectionPath(payload.project, payload.collection)}/databases/${payload.name}`,
+      );
+    },
+    onSuccess: (_data, variables) => {
+      queryClient.invalidateQueries({ queryKey: ['catalog', 'databases', variables.project, variables.collection] });
+      queryClient.invalidateQueries({ queryKey: ['catalog', 'collections', variables.project] });
+    },
+  });
+}
+
+// --- Update Table (Iceberg REST — set-properties / remove-properties) ---
 
 export interface UpdateTablePayload {
   project: string;
@@ -668,7 +702,7 @@ export function useUpdateTable() {
   });
 }
 
-// --- Update Volume (PUT) ---
+// --- Update Volume (Catalog API) ---
 
 export interface UpdateVolumePayload {
   project: string;
@@ -689,7 +723,7 @@ export function useUpdateVolume() {
       if (payload.properties) body.properties = payload.properties;
       if (payload.storageLocation) body.storage_location = payload.storageLocation;
       return putJson(
-        `${namespacePath(payload.project, payload.namespace)}/volumes/${payload.name}`,
+        `${collectionPath(payload.project, payload.namespace)}/volumes/${payload.name}`,
         body,
       );
     },
@@ -699,7 +733,7 @@ export function useUpdateVolume() {
   });
 }
 
-// --- Create Connection (via BFF → K8s Secret) ---
+// --- Create Connection (via BFF — unchanged) ---
 
 export interface CreateConnectionPayload {
   namespace: string;
@@ -730,7 +764,7 @@ export function useCreateConnection() {
   });
 }
 
-// --- Delete Connection (via BFF → K8s Secret) ---
+// --- Delete Connection (via BFF — unchanged) ---
 
 export function useDeleteConnection() {
   const queryClient = useQueryClient();

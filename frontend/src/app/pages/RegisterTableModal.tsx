@@ -11,10 +11,11 @@ import {
   TextInput,
   FormSelect,
   FormSelectOption,
-  ActionGroup,
   Alert,
   Flex,
   FlexItem,
+  Checkbox,
+  Title,
 } from '@patternfly/react-core';
 import { useCreateTable, DataConnection } from './useCatalogApi';
 
@@ -26,7 +27,10 @@ interface RegisterTableModalProps {
 }
 
 const FORMAT_OPTIONS = ['iceberg', 'parquet', 'delta', 'csv'];
-const TYPE_OPTIONS = ['MANAGED', 'EXTERNAL'];
+const COLUMN_TYPE_OPTIONS = [
+  'string', 'integer', 'long', 'float', 'double',
+  'decimal', 'boolean', 'date', 'timestamp', 'binary',
+];
 
 const RegisterTableModal: React.FC<RegisterTableModalProps> = ({
   project,
@@ -37,26 +41,49 @@ const RegisterTableModal: React.FC<RegisterTableModalProps> = ({
   const [name, setName] = React.useState('');
   const [description, setDescription] = React.useState('');
   const [format, setFormat] = React.useState('iceberg');
-  const [volumeType, setVolumeType] = React.useState('MANAGED');
   const [connectionRef, setConnectionRef] = React.useState('');
   const [location, setLocation] = React.useState('');
-  const [tagKey, setTagKey] = React.useState('');
-  const [tagValue, setTagValue] = React.useState('');
-  const [tags, setTags] = React.useState<Array<{ key: string; value: string }>>([]);
+  const [columns, setColumns] = React.useState<Array<{ name: string; type: string; description: string; nullable: boolean }>>([]);
   const [error, setError] = React.useState('');
+
+  // Properties state
+  const [purpose, setPurpose] = React.useState('');
+  const [license, setLicense] = React.useState('');
+  const [maturity, setMaturity] = React.useState('');
+  const [domain, setDomain] = React.useState('');
+  const [owner, setOwner] = React.useState('');
+  const [pii, setPii] = React.useState('');
+  const [agentTags, setAgentTags] = React.useState('');
+
+  // Custom properties (key/value pairs)
+  const [customKey, setCustomKey] = React.useState('');
+  const [customValue, setCustomValue] = React.useState('');
+  const [customProps, setCustomProps] = React.useState<Array<{ key: string; value: string }>>([]);
 
   const createMutation = useCreateTable();
 
-  const handleAddTag = () => {
-    if (tagKey.trim()) {
-      setTags([...tags, { key: tagKey.trim(), value: tagValue.trim() }]);
-      setTagKey('');
-      setTagValue('');
+  const handleAddCustomProp = () => {
+    if (customKey.trim()) {
+      setCustomProps([...customProps, { key: customKey.trim(), value: customValue.trim() }]);
+      setCustomKey('');
+      setCustomValue('');
     }
   };
 
-  const handleRemoveTag = (index: number) => {
-    setTags(tags.filter((_, i) => i !== index));
+  const handleRemoveCustomProp = (index: number) => {
+    setCustomProps(customProps.filter((_, i) => i !== index));
+  };
+
+  const handleAddColumn = () => {
+    setColumns([...columns, { name: '', type: 'string', description: '', nullable: true }]);
+  };
+
+  const handleRemoveColumn = (index: number) => {
+    setColumns(columns.filter((_, i) => i !== index));
+  };
+
+  const handleColumnChange = (index: number, field: 'name' | 'type' | 'description' | 'nullable', value: string | boolean) => {
+    setColumns(columns.map((col, i) => (i === index ? { ...col, [field]: value } : col)));
   };
 
   const handleSubmit = async () => {
@@ -66,21 +93,43 @@ const RegisterTableModal: React.FC<RegisterTableModalProps> = ({
     }
     setError('');
 
-    const tagMap: Record<string, string> = {};
-    tags.forEach((t) => { tagMap[t.key] = t.value; });
+    // Build properties dict
+    const customTagsMap: Record<string, string> = {};
+    customProps.forEach((t) => { customTagsMap[t.key] = t.value; });
+
+    const properties: Record<string, string> = {};
+    if (purpose) properties.purpose = purpose;
+    if (license) properties.license = license;
+    if (maturity) properties.maturity = maturity;
+    if (domain) properties.domain = domain;
+    if (owner) properties.owner = owner;
+    if (pii) properties.pii = pii;
+    if (agentTags) properties.agent_tags = agentTags;
+    Object.assign(properties, customTagsMap);
 
     try {
+      const schemaFields = columns
+        .filter((c) => c.name.trim())
+        .map((c) => ({
+          name: c.name.trim(),
+          type: c.type,
+          description: c.description.trim() || undefined,
+          nullable: c.nullable,
+        }));
+
       await createMutation.mutateAsync({
         project,
         name: name.trim(),
         namespace,
         description,
         format,
-        volumeType,
+        volumeType: '',
         location,
         connectionRef,
-        tags: tagMap,
+        tags: {},
         isVolume: false,
+        schemaFields: schemaFields.length > 0 ? schemaFields : undefined,
+        properties: Object.keys(properties).length > 0 ? properties : undefined,
       });
       onClose();
     } catch (e: any) {
@@ -130,18 +179,6 @@ const RegisterTableModal: React.FC<RegisterTableModalProps> = ({
             </FormSelect>
           </FormGroup>
 
-          <FormGroup label="Type" fieldId="table-type">
-            <FormSelect
-              id="table-type"
-              value={volumeType}
-              onChange={(_event, val) => setVolumeType(val)}
-            >
-              {TYPE_OPTIONS.map((t) => (
-                <FormSelectOption key={t} value={t} label={t} />
-              ))}
-            </FormSelect>
-          </FormGroup>
-
           <FormGroup label="Connection" fieldId="table-connection">
             <FormSelect
               id="table-connection"
@@ -168,38 +205,173 @@ const RegisterTableModal: React.FC<RegisterTableModalProps> = ({
             />
           </FormGroup>
 
-          <FormGroup label="Tags" fieldId="table-tags">
+          <FormGroup label="Schema (columns)" fieldId="table-columns">
+            {columns.map((col, i) => (
+              <Flex key={i} style={{ marginBottom: '8px' }} alignItems={{ default: 'alignItemsCenter' }}>
+                <FlexItem>
+                  <TextInput
+                    id={`col-name-${i}`}
+                    value={col.name}
+                    onChange={(_event, val) => handleColumnChange(i, 'name', val)}
+                    placeholder="Column name"
+                    style={{ width: '160px' }}
+                  />
+                </FlexItem>
+                <FlexItem>
+                  <FormSelect
+                    id={`col-type-${i}`}
+                    value={col.type}
+                    onChange={(_event, val) => handleColumnChange(i, 'type', val)}
+                    style={{ width: '140px' }}
+                  >
+                    {COLUMN_TYPE_OPTIONS.map((t) => (
+                      <FormSelectOption key={t} value={t} label={t} />
+                    ))}
+                  </FormSelect>
+                </FlexItem>
+                <FlexItem>
+                  <TextInput
+                    id={`col-desc-${i}`}
+                    value={col.description}
+                    onChange={(_event, val) => handleColumnChange(i, 'description', val)}
+                    placeholder="Column description"
+                    style={{ width: '160px' }}
+                  />
+                </FlexItem>
+                <FlexItem>
+                  <Checkbox
+                    id={`col-nullable-${i}`}
+                    label="Nullable"
+                    isChecked={col.nullable}
+                    onChange={(_event, checked) => handleColumnChange(i, 'nullable', checked)}
+                  />
+                </FlexItem>
+                <FlexItem>
+                  <Button variant="plain" onClick={() => handleRemoveColumn(i)} style={{ padding: '2px' }}>
+                    &times;
+                  </Button>
+                </FlexItem>
+              </Flex>
+            ))}
+            <Button variant="secondary" onClick={handleAddColumn}>
+              Add column
+            </Button>
+          </FormGroup>
+
+          <Title headingLevel="h3" size="md" style={{ marginTop: '16px', marginBottom: '8px' }}>
+            Properties
+          </Title>
+
+          <FormGroup label="Purpose" fieldId="table-purpose">
+            <TextInput
+              id="table-purpose"
+              value={purpose}
+              onChange={(_event, val) => setPurpose(val)}
+              placeholder="e.g. Risk assessment model training data"
+            />
+          </FormGroup>
+
+          <FormGroup label="License" fieldId="table-license">
+            <FormSelect
+              id="table-license"
+              value={license}
+              onChange={(_event, val) => setLicense(val)}
+            >
+              <FormSelectOption value="" label="Select license" />
+              <FormSelectOption value="internal-only" label="internal-only" />
+              <FormSelectOption value="apache-2.0" label="apache-2.0" />
+              <FormSelectOption value="mit" label="mit" />
+              <FormSelectOption value="cc-by-4.0" label="cc-by-4.0" />
+              <FormSelectOption value="proprietary" label="proprietary" />
+              <FormSelectOption value="other" label="other" />
+            </FormSelect>
+          </FormGroup>
+
+          <FormGroup label="Maturity" fieldId="table-maturity">
+            <FormSelect
+              id="table-maturity"
+              value={maturity}
+              onChange={(_event, val) => setMaturity(val)}
+            >
+              <FormSelectOption value="" label="Select maturity" />
+              <FormSelectOption value="raw" label="raw" />
+              <FormSelectOption value="curated" label="curated" />
+              <FormSelectOption value="production" label="production" />
+            </FormSelect>
+          </FormGroup>
+
+          <FormGroup label="Domain" fieldId="table-domain">
+            <TextInput
+              id="table-domain"
+              value={domain}
+              onChange={(_event, val) => setDomain(val)}
+              placeholder="e.g. insurance, finance, healthcare"
+            />
+          </FormGroup>
+
+          <FormGroup label="Owner" fieldId="table-owner">
+            <TextInput
+              id="table-owner"
+              value={owner}
+              onChange={(_event, val) => setOwner(val)}
+              placeholder="e.g. underwriting-team"
+            />
+          </FormGroup>
+
+          <FormGroup label="PII" fieldId="table-pii">
+            <FormSelect
+              id="table-pii"
+              value={pii}
+              onChange={(_event, val) => setPii(val)}
+            >
+              <FormSelectOption value="" label="Select PII status" />
+              <FormSelectOption value="false" label="false" />
+              <FormSelectOption value="true" label="true" />
+              <FormSelectOption value="unknown" label="unknown" />
+            </FormSelect>
+          </FormGroup>
+
+          <FormGroup label="Agent tags" fieldId="table-agent-tags">
+            <TextInput
+              id="table-agent-tags"
+              value={agentTags}
+              onChange={(_event, val) => setAgentTags(val)}
+              placeholder="e.g. risk, insurance, policies (comma-separated)"
+            />
+          </FormGroup>
+
+          <FormGroup label="Custom properties" fieldId="table-custom-props">
             <Flex>
               <FlexItem>
                 <TextInput
-                  id="tag-key"
-                  value={tagKey}
-                  onChange={(_event, val) => setTagKey(val)}
+                  id="custom-key"
+                  value={customKey}
+                  onChange={(_event, val) => setCustomKey(val)}
                   placeholder="Key"
                   style={{ width: '160px' }}
                 />
               </FlexItem>
               <FlexItem>
                 <TextInput
-                  id="tag-value"
-                  value={tagValue}
-                  onChange={(_event, val) => setTagValue(val)}
+                  id="custom-value"
+                  value={customValue}
+                  onChange={(_event, val) => setCustomValue(val)}
                   placeholder="Value"
                   style={{ width: '160px' }}
                 />
               </FlexItem>
               <FlexItem>
-                <Button variant="secondary" onClick={handleAddTag}>
+                <Button variant="secondary" onClick={handleAddCustomProp}>
                   Add
                 </Button>
               </FlexItem>
             </Flex>
-            {tags.length > 0 && (
+            {customProps.length > 0 && (
               <div style={{ marginTop: '8px' }}>
-                {tags.map((tag, i) => (
+                {customProps.map((prop, i) => (
                   <div key={i} style={{ display: 'flex', gap: '8px', marginBottom: '4px', alignItems: 'center' }}>
-                    <span style={{ fontSize: '13px' }}>{tag.key}: {tag.value}</span>
-                    <Button variant="plain" onClick={() => handleRemoveTag(i)} style={{ padding: '2px' }}>
+                    <span style={{ fontSize: '13px' }}>{prop.key}: {prop.value}</span>
+                    <Button variant="plain" onClick={() => handleRemoveCustomProp(i)} style={{ padding: '2px' }}>
                       ×
                     </Button>
                   </div>

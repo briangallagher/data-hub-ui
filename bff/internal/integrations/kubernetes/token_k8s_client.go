@@ -2,6 +2,7 @@ package kubernetes
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -164,13 +165,49 @@ func (kc *TokenKubernetesClient) GetNamespaces(ctx context.Context, _ *RequestId
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	nsList, err := kc.Client.CoreV1().Namespaces().List(ctx, metav1.ListOptions{})
-	if err != nil {
-		kc.Logger.Error("user is not allowed to list namespaces or failed to list namespaces")
-		return []corev1.Namespace{}, fmt.Errorf("failed to list namespaces: %w", err)
+	// Use OpenShift Projects API — returns only projects the user has access to.
+	// Regular users cannot list all K8s namespaces but CAN list their own projects.
+	result := kc.Client.Discovery().RESTClient().Get().
+		AbsPath("/apis/project.openshift.io/v1/projects").
+		Do(ctx)
+	if err := result.Error(); err != nil {
+		kc.Logger.Warn("OpenShift Projects API failed, falling back to K8s Namespaces", "error", err)
+		nsList, nsErr := kc.Client.CoreV1().Namespaces().List(ctx, metav1.ListOptions{})
+		if nsErr != nil {
+			return []corev1.Namespace{}, fmt.Errorf("failed to list namespaces: %w", nsErr)
+		}
+		return nsList.Items, nil
 	}
 
-	return nsList.Items, nil
+	raw, err := result.Raw()
+	if err != nil {
+		return []corev1.Namespace{}, fmt.Errorf("failed to read projects response: %w", err)
+	}
+
+	// Parse project names from the response
+	type projectItem struct {
+		Metadata struct {
+			Name   string            `json:"name"`
+			Labels map[string]string `json:"labels"`
+		} `json:"metadata"`
+	}
+	type projectList struct {
+		Items []projectItem `json:"items"`
+	}
+
+	var projects projectList
+	if err := json.Unmarshal(raw, &projects); err != nil {
+		return []corev1.Namespace{}, fmt.Errorf("failed to parse projects: %w", err)
+	}
+
+	var namespaces []corev1.Namespace
+	for _, p := range projects.Items {
+		ns := corev1.Namespace{}
+		ns.Name = p.Metadata.Name
+		ns.Labels = p.Metadata.Labels
+		namespaces = append(namespaces, ns)
+	}
+	return namespaces, nil
 }
 
 func (kc *TokenKubernetesClient) GetUser(_ *RequestIdentity) (string, error) {

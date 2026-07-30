@@ -157,6 +157,23 @@ func NewApp(cfg config.EnvConfig, logger *slog.Logger) (*App, error) {
 	return app, nil
 }
 
+// extractNamespaceFromPath extracts the RHAI namespace (K8s namespace) from
+// Iceberg REST API paths like /v1/{namespace}/namespaces/... The namespace is
+// the first path segment after /v1/. Reserved top-level routes (config, search,
+// projects) return empty string — they are not scoped to a namespace.
+func extractNamespaceFromPath(urlPath string) string {
+	parts := strings.Split(strings.TrimPrefix(urlPath, "/"), "/")
+	if len(parts) < 2 || parts[0] != "v1" {
+		return ""
+	}
+	candidate := parts[1]
+	switch candidate {
+	case "config", "search", "projects":
+		return ""
+	}
+	return candidate
+}
+
 func (app *App) Shutdown() error {
 	app.logger.Info("shutting down app...")
 	if app.wsTracker != nil {
@@ -197,7 +214,7 @@ func (app *App) Routes() http.Handler {
 	// Catalog API reverse proxy — forwards /api/catalog/* to the shared catalog server
 	catalogURL := os.Getenv("CATALOG_API_URL")
 	if catalogURL == "" {
-		catalogURL = "http://feast-catalog.redhat-ods-applications.svc:6572"
+		catalogURL = "https://feast-catalog.redhat-ods-applications.svc:8443"
 	}
 	catalogClient := &http.Client{
 		Transport: &http.Transport{
@@ -225,6 +242,11 @@ func (app *App) Routes() http.Handler {
 			for _, v := range vv {
 				proxyReq.Header.Add(k, v)
 			}
+		}
+		// Extract RHAI namespace from URL path and set X-Namespace header
+		// for kube-rbac-proxy authorization. Path format: /v1/{namespace}/...
+		if ns := extractNamespaceFromPath(targetPath); ns != "" {
+			proxyReq.Header.Set("X-Namespace", ns)
 		}
 		// Ensure the catalog server receives an Authorization header.
 		// Priority: (1) explicit Authorization header from client,

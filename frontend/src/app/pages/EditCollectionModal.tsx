@@ -57,7 +57,6 @@ const EditCollectionModal: React.FC<EditCollectionModalProps> = ({
           credentials: 'include',
           headers: {
             'Content-Type': 'application/json',
-            'kubeflow-userid': 'admin@example.com',
           },
           body: JSON.stringify(body),
         },

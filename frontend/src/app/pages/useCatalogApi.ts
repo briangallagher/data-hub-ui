@@ -107,7 +107,7 @@ export interface DataConnection {
 async function fetchJson<T>(url: string): Promise<T> {
   const resp = await fetch(url, {
     credentials: 'include',
-    headers: { 'kubeflow-userid': 'admin@example.com' },
+    headers: {},
   });
   if (!resp.ok) {
     throw new Error(`API error: ${resp.status} ${resp.statusText}`);
@@ -121,7 +121,6 @@ async function postJson<T>(url: string, body: unknown): Promise<T> {
     credentials: 'include',
     headers: {
       'Content-Type': 'application/json',
-      'kubeflow-userid': 'admin@example.com',
     },
     body: JSON.stringify(body),
   });
@@ -136,7 +135,7 @@ async function deleteRequest(url: string): Promise<void> {
   const resp = await fetch(url, {
     method: 'DELETE',
     credentials: 'include',
-    headers: { 'kubeflow-userid': 'admin@example.com' },
+    headers: {},
   });
   if (!resp.ok) {
     const text = await resp.text().catch(() => '');
@@ -150,7 +149,6 @@ async function putJson<T>(url: string, body: unknown): Promise<T> {
     credentials: 'include',
     headers: {
       'Content-Type': 'application/json',
-      'kubeflow-userid': 'admin@example.com',
     },
     body: JSON.stringify(body),
   });
@@ -187,7 +185,7 @@ export function useK8sNamespaces() {
     queryFn: async (): Promise<{ name: string }[]> => {
       const resp = await fetch(`${BFF_BASE}/namespaces`, {
         credentials: 'include',
-        headers: { 'kubeflow-userid': 'admin@example.com' },
+        headers: {},
       });
       if (!resp.ok) throw new Error(`BFF error: ${resp.status}`);
       const envelope: NamespaceEnvelope = await resp.json();
@@ -362,7 +360,7 @@ export function useConnections(namespace: string) {
     queryFn: async (): Promise<DataConnection[]> => {
       const resp = await fetch(`${BFF_BASE}/connections?namespace=${namespace}`, {
         credentials: 'include',
-        headers: { 'kubeflow-userid': 'admin@example.com' },
+        headers: {},
       });
       if (!resp.ok) return [];
       const data = await resp.json();

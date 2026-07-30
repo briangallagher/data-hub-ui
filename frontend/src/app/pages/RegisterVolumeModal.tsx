@@ -37,6 +37,7 @@ const RegisterVolumeModal: React.FC<RegisterVolumeModalProps> = ({
   const [location, setLocation] = React.useState('');
   const [contentType, setContentType] = React.useState('');
   const [error, setError] = React.useState('');
+  const [accessMode, setAccessMode] = React.useState<'connection' | 'location'>('connection');
 
   // Properties state
   const [purpose, setPurpose] = React.useState('');
@@ -70,8 +71,12 @@ const RegisterVolumeModal: React.FC<RegisterVolumeModalProps> = ({
       setError('Name is required');
       return;
     }
-    if (!location.trim()) {
+    if (accessMode === 'location' && !location.trim()) {
       setError('Storage location is required');
+      return;
+    }
+    if (accessMode === 'connection' && !connectionRef) {
+      setError('Please select a connection');
       return;
     }
     setError('');
@@ -97,8 +102,8 @@ const RegisterVolumeModal: React.FC<RegisterVolumeModalProps> = ({
         description,
         format: contentType,
         volumeType: 'EXTERNAL',
-        location,
-        connectionRef,
+        location: accessMode === 'location' ? location : '',
+        connectionRef: accessMode === 'connection' ? connectionRef : '',
         tags: {},
         isVolume: true,
         properties: Object.keys(properties).length > 0 ? properties : undefined,
@@ -147,31 +152,50 @@ const RegisterVolumeModal: React.FC<RegisterVolumeModalProps> = ({
             />
           </FormGroup>
 
-          <FormGroup label="Connection" fieldId="volume-connection">
-            <FormSelect
-              id="volume-connection"
-              value={connectionRef}
-              onChange={(_event, val) => setConnectionRef(val)}
-            >
-              <FormSelectOption value="" label="None — use storage location" />
-              {connections.map((c) => (
-                <FormSelectOption
-                  key={c.name}
-                  value={c.name}
-                  label={`${c.displayName} (${c.connectionType})`}
-                />
-              ))}
-            </FormSelect>
+          <FormGroup label="Data access" fieldId="access-mode">
+            <Flex>
+              <FlexItem>
+                <Button variant={accessMode === 'connection' ? 'primary' : 'secondary'} onClick={() => setAccessMode('connection')}>
+                  Data Connection
+                </Button>
+              </FlexItem>
+              <FlexItem>
+                <Button variant={accessMode === 'location' ? 'primary' : 'secondary'} onClick={() => setAccessMode('location')}>
+                  Storage location
+                </Button>
+              </FlexItem>
+            </Flex>
           </FormGroup>
 
-          <FormGroup label="Storage location" isRequired fieldId="volume-location">
-            <TextInput
-              id="volume-location"
-              value={location}
-              onChange={(_event, val) => setLocation(val)}
-              placeholder="e.g. s3://bucket/path, https://huggingface.co/datasets/..., https://github.com/..."
-            />
-          </FormGroup>
+          {accessMode === 'connection' && (
+            <FormGroup label="Connection" fieldId="volume-connection">
+              <FormSelect
+                id="volume-connection"
+                value={connectionRef}
+                onChange={(_event, val) => setConnectionRef(val)}
+              >
+                <FormSelectOption value="" label="Select a connection" />
+                {connections.map((c) => (
+                  <FormSelectOption
+                    key={c.name}
+                    value={c.name}
+                    label={`${c.displayName} (${c.connectionType})`}
+                  />
+                ))}
+              </FormSelect>
+            </FormGroup>
+          )}
+
+          {accessMode === 'location' && (
+            <FormGroup label="Storage location" fieldId="volume-location">
+              <TextInput
+                id="volume-location"
+                value={location}
+                onChange={(_event, val) => setLocation(val)}
+                placeholder="e.g. s3://bucket/path, https://huggingface.co/datasets/..., https://github.com/..."
+              />
+            </FormGroup>
+          )}
 
           <FormGroup label="Content type" fieldId="volume-content-type">
             <FormSelect

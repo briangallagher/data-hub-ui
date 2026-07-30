@@ -2,41 +2,30 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 
 const PROXY_BASE = '/data-hub/api/catalog';
 const BFF_BASE = '/data-hub/api/v1';
-const CATALOG_API = `${PROXY_BASE}/catalog`;
-const ICEBERG_API = `${PROXY_BASE}/v1`;
+const API_BASE = `${PROXY_BASE}/v1`;
 
-function catalogPath(project: string) {
-  return `${CATALOG_API}/projects/${project}`;
+// Iceberg extension paths (/v1)
+function namespacesPath(project: string) {
+  return `${API_BASE}/${project}/namespaces`;
 }
 
-function collectionPath(project: string, collection: string) {
-  return `${catalogPath(project)}/collections/${collection}`;
+function genericTablesPath(project: string, namespace: string) {
+  return `${API_BASE}/${project}/namespaces/${namespace}/generic-tables`;
 }
 
-// Legacy Iceberg REST paths (used by useUpdateTable — Iceberg-specific operations)
-function icebergPath(project: string) {
-  return `${ICEBERG_API}/${project}`;
+function icebergTablesPath(project: string, namespace: string) {
+  return `${API_BASE}/${project}/namespaces/${namespace}/tables`;
 }
 
-function namespacePath(project: string, collection: string) {
-  return `${icebergPath(project)}/namespaces/${collection}`;
+function volumesPath(project: string, namespace: string) {
+  return `${API_BASE}/${project}/namespaces/${namespace}/volumes`;
+}
+
+function searchPath(project: string) {
+  return `${API_BASE}/${project}/search`;
 }
 
 // --- Catalog API Response Interfaces ---
-
-interface CatalogCollection {
-  name: string;
-  description: string;
-  table_count: number;
-  volume_count: number;
-  database_count?: number;
-  created_date?: string;
-  properties?: Record<string, string>;
-}
-
-interface CatalogCollectionsResponse {
-  collections: CatalogCollection[];
-}
 
 interface CatalogAsset {
   name: string;
@@ -57,21 +46,6 @@ interface CatalogAssetsResponse {
   assets: CatalogAsset[];
 }
 
-interface CatalogDatabaseAsset {
-  name: string;
-  asset_type: string;
-  db_type: string;
-  host: string;
-  database: string;
-  schemas: string[];
-  connection_ref: string;
-  description: string;
-}
-
-interface CatalogDatabasesResponse {
-  assets: CatalogDatabaseAsset[];
-}
-
 // --- Exported Interfaces ---
 
 export interface ProjectInfo {
@@ -90,7 +64,7 @@ export interface CollectionInfo {
 }
 
 export interface SearchResult {
-  type: 'collection' | 'table' | 'volume' | 'database';
+  type: 'collection' | 'table' | 'volume';
   name: string;
   project: string;
   namespace: string;
@@ -114,18 +88,8 @@ export interface TableAsset {
   uuid: string;
   isVolume: boolean;
   columns?: Array<{name: string; type: string; nullable?: boolean; description?: string}>;
-}
-
-export interface DatabaseAsset {
-  name: string;
-  asset_type: 'database';
-  db_type: string;       // postgresql, mysql, snowflake, etc.
-  host: string;
-  database: string;
-  schemas: string[];
-  connection_ref: string;
-  description: string;
-  collection: string;
+  registeredBy?: string;
+  createdAt?: string;
 }
 
 export interface DataConnection {
@@ -200,18 +164,15 @@ async function putJson<T>(url: string, body: unknown): Promise<T> {
 // --- Projects ---
 
 interface ProjectsResponse {
-  projects: Array<{ spec: { name: string }; meta: { createdTimestamp: string } }>;
+  projects: string[];
 }
 
 export function useProjects() {
   return useQuery({
     queryKey: ['catalog', 'projects'],
     queryFn: async (): Promise<ProjectInfo[]> => {
-      const data = await fetchJson<ProjectsResponse>(`${PROXY_BASE}/v1/projects`);
-      return (data.projects || []).map((p) => ({
-        name: p.spec.name,
-        createdTimestamp: p.meta?.createdTimestamp,
-      }));
+      const data = await fetchJson<ProjectsResponse>(`${API_BASE}/projects`);
+      return (data.projects || []).map((name) => ({ name }));
     },
   });
 }
@@ -236,12 +197,16 @@ export function useK8sNamespaces() {
   });
 }
 
-// --- Namespaces / Collections within a project (Catalog API) ---
+// --- Namespaces (Iceberg extension) ---
+
+interface IcebergNamespacesResponse {
+  namespaces: string[][];
+}
 
 export function useNamespaces(project: string) {
   return useQuery({
     queryKey: ['catalog', 'namespaces', project],
-    queryFn: () => fetchJson<CatalogCollectionsResponse>(`${catalogPath(project)}/collections`),
+    queryFn: () => fetchJson<IcebergNamespacesResponse>(namespacesPath(project)),
     enabled: !!project,
   });
 }
@@ -250,63 +215,25 @@ export function useCollections(project: string) {
   return useQuery({
     queryKey: ['catalog', 'collections', project],
     queryFn: async (): Promise<CollectionInfo[]> => {
-      const data = await fetchJson<CatalogCollectionsResponse>(
-        `${catalogPath(project)}/collections`,
-      );
-      return (data.collections || []).map((c) => ({
-        name: c.name,
+      const data = await fetchJson<IcebergNamespacesResponse>(namespacesPath(project));
+      return (data.namespaces || []).map((ns) => ({
+        name: ns[0] || 'default',
         project,
-        description: c.description || '',
-        tableCount: c.table_count || 0,
-        volumeCount: c.volume_count || 0,
-        createdDate: c.created_date || '',
-        properties: c.properties || {},
+        description: '',
+        tableCount: 0,
+        volumeCount: 0,
+        createdDate: '',
+        properties: {},
       }));
     },
     enabled: !!project,
   });
 }
 
-// --- All-Projects Collections ---
-
-export function useAllProjectsCollections(projects: ProjectInfo[]) {
-  const projectNames = projects.map((p) => p.name);
-
-  return useQuery({
-    queryKey: ['catalog', 'all-collections', projectNames],
-    queryFn: async (): Promise<CollectionInfo[]> => {
-      const allCollections: CollectionInfo[] = [];
-
-      for (const projectName of projectNames) {
-        try {
-          const data = await fetchJson<CatalogCollectionsResponse>(
-            `${catalogPath(projectName)}/collections`,
-          );
-          for (const c of data.collections || []) {
-            allCollections.push({
-              name: c.name,
-              project: projectName,
-              description: c.description || '',
-              tableCount: c.table_count || 0,
-              volumeCount: c.volume_count || 0,
-              createdDate: c.created_date || '',
-              properties: c.properties || {},
-            });
-          }
-        } catch { /* skip inaccessible projects */ }
-      }
-
-      return allCollections;
-    },
-    enabled: projectNames.length > 0,
-    staleTime: 60000,
-  });
-}
-
 // --- Server-side Search ---
 
 interface ServerSearchResult {
-  type: 'collection' | 'table' | 'volume' | 'database';
+  type: string;
   namespace: string[];
   name: string;
   description: string | null;
@@ -333,12 +260,12 @@ export function useSearchAssets(
     queryKey: ['catalog', 'search', project, query],
     queryFn: async (): Promise<SearchResult[]> => {
       const url = project
-        ? `${catalogPath(project)}/search?query=${encodeURIComponent(query)}`
-        : `${CATALOG_API}/search?query=${encodeURIComponent(query)}`;
+        ? `${searchPath(project)}?query=${encodeURIComponent(query)}`
+        : `${API_BASE}/search?query=${encodeURIComponent(query)}`;
 
       const data = await fetchJson<ServerSearchResponse>(url);
       return (data.results || []).map((item) => ({
-        type: item.type,
+        type: item.type as SearchResult['type'],
         name: item.name,
         project: item.project || project,
         namespace: item.namespace?.[0] || '',
@@ -354,18 +281,15 @@ export function useSearchAssets(
   });
 }
 
-// --- Tables & Volumes (Catalog API) ---
+// --- Tables & Volumes (Iceberg extension) ---
 
-export function useTablesAndVolumes(project: string, namespace: string) {
-  return useQuery({
-    queryKey: ['catalog', 'tables-and-volumes', project, namespace],
-    queryFn: async (): Promise<TableAsset[]> => {
+export async function fetchTablesAndVolumes(project: string, namespace: string): Promise<TableAsset[]> {
       const assets: TableAsset[] = [];
 
-      // Fetch tables via Catalog API
+      // Fetch tables (including databases) via generic-tables extension
       try {
         const tablesResp = await fetchJson<CatalogAssetsResponse>(
-          `${collectionPath(project, namespace)}/tables`,
+          genericTablesPath(project, namespace),
         );
         for (const a of tablesResp.assets || []) {
           assets.push({
@@ -381,34 +305,43 @@ export function useTablesAndVolumes(project: string, namespace: string) {
             uuid: a.uuid || '',
             isVolume: false,
             columns: a.columns || [],
+            registeredBy: (a as any).registered_by || undefined,
+            createdAt: (a as any).created_at || undefined,
           });
         }
       } catch { /* no tables */ }
 
-      // Fetch volumes via Catalog API
+      // Fetch volumes via Iceberg extension
       try {
-        const volumesResp = await fetchJson<CatalogAssetsResponse>(
-          `${collectionPath(project, namespace)}/volumes`,
+        const volumesResp = await fetchJson<any>(
+          volumesPath(project, namespace),
         );
-        for (const a of volumesResp.assets || []) {
+        for (const v of volumesResp.volumes || []) {
           assets.push({
-            name: a.name,
+            name: v.name,
             namespace,
-            description: a.description || '',
-            format: a.format || '',
-            volumeType: a.volume_type || 'EXTERNAL',
-            location: a.location || '',
-            connectionRef: a.connection_ref || '',
-            tags: a.tags || {},
-            properties: a.properties || {},
-            uuid: a.uuid || '',
+            description: v.comment || v.properties?.description || '',
+            format: '',
+            volumeType: v['volume-type'] || 'EXTERNAL',
+            location: v['storage-location'] || '',
+            connectionRef: v.properties?.['connection-ref'] || '',
+            tags: {},
+            properties: v.properties || {},
+            uuid: '',
             isVolume: true,
+            registeredBy: v.properties?.registered_by,
+            createdAt: v['created-at'] ? String(v['created-at']) : undefined,
           });
         }
       } catch { /* no volumes */ }
 
-      return assets;
-    },
+  return assets;
+}
+
+export function useTablesAndVolumes(project: string, namespace: string) {
+  return useQuery({
+    queryKey: ['catalog', 'tables-and-volumes', project, namespace],
+    queryFn: () => fetchTablesAndVolumes(project, namespace),
     enabled: !!project && !!namespace,
   });
 }
@@ -416,33 +349,8 @@ export function useTablesAndVolumes(project: string, namespace: string) {
 export function useTableDetail(project: string, namespace: string, name: string) {
   return useQuery({
     queryKey: ['catalog', 'table-detail', project, namespace, name],
-    queryFn: () => fetchJson<CatalogAsset>(`${collectionPath(project, namespace)}/tables/${name}`),
+    queryFn: () => fetchJson<CatalogAsset>(`${genericTablesPath(project, namespace)}/${name}`),
     enabled: !!project && !!namespace && !!name,
-  });
-}
-
-// --- Databases (Catalog API) ---
-
-export function useDatabases(project: string, collection: string) {
-  return useQuery({
-    queryKey: ['catalog', 'databases', project, collection],
-    queryFn: async (): Promise<DatabaseAsset[]> => {
-      const data = await fetchJson<CatalogDatabasesResponse>(
-        `${collectionPath(project, collection)}/databases`,
-      );
-      return (data.assets || []).map((a) => ({
-        name: a.name,
-        asset_type: 'database' as const,
-        db_type: a.db_type || '',
-        host: a.host || '',
-        database: a.database || '',
-        schemas: a.schemas || [],
-        connection_ref: a.connection_ref || '',
-        description: a.description || '',
-        collection,
-      }));
-    },
-    enabled: !!project && !!collection,
   });
 }
 
@@ -464,7 +372,7 @@ export function useConnections(namespace: string) {
   });
 }
 
-// --- Create Table (Catalog API) ---
+// --- Create Table (Iceberg extension) ---
 
 interface CreateTablePayload {
   project: string;
@@ -503,7 +411,7 @@ export function useCreateTable() {
       };
 
       return postJson(
-        `${collectionPath(payload.project, payload.namespace)}/tables`,
+        genericTablesPath(payload.project, payload.namespace),
         body,
       );
     },
@@ -514,7 +422,7 @@ export function useCreateTable() {
   });
 }
 
-// --- Create Volume (Catalog API) ---
+// --- Create Volume (Iceberg extension) ---
 
 export function useCreateVolume() {
   const queryClient = useQueryClient();
@@ -535,7 +443,7 @@ export function useCreateVolume() {
       };
 
       return postJson(
-        `${collectionPath(payload.project, payload.namespace)}/volumes`,
+        volumesPath(payload.project, payload.namespace),
         body,
       );
     },
@@ -546,7 +454,7 @@ export function useCreateVolume() {
   });
 }
 
-// --- Create Collection (Catalog API) ---
+// --- Create Namespace (Iceberg extension) ---
 
 export function useCreateNamespace() {
   const queryClient = useQueryClient();
@@ -554,8 +462,8 @@ export function useCreateNamespace() {
   return useMutation({
     mutationFn: async (payload: { project: string; name: string }) => {
       return postJson(
-        `${catalogPath(payload.project)}/collections`,
-        { name: payload.name },
+        namespacesPath(payload.project),
+        { namespace: [payload.name] },
       );
     },
     onSuccess: async (_data, variables) => {
@@ -567,46 +475,14 @@ export function useCreateNamespace() {
   });
 }
 
-// --- Create Database (Catalog API) ---
-
-interface CreateDatabasePayload {
-  project: string;
-  collection: string;
-  name: string;
-  db_type: string;
-  host: string;
-  database: string;
-  schemas: string[];
-  connection_ref: string;
-  description: string;
-}
-
-export function useCreateDatabase() {
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: async (payload: CreateDatabasePayload) => {
-      const { project, collection, ...body } = payload;
-      return postJson(
-        `${collectionPath(project, collection)}/databases`,
-        body,
-      );
-    },
-    onSuccess: (_data, variables) => {
-      queryClient.invalidateQueries({ queryKey: ['catalog', 'databases', variables.project, variables.collection] });
-      queryClient.invalidateQueries({ queryKey: ['catalog', 'collections', variables.project] });
-    },
-  });
-}
-
-// --- Delete Collection (Catalog API) ---
+// --- Delete Namespace (Iceberg extension) ---
 
 export function useDeleteNamespace() {
   const queryClient = useQueryClient();
 
   return useMutation({
     mutationFn: async (payload: { project: string; name: string }) => {
-      return deleteRequest(`${collectionPath(payload.project, payload.name)}`);
+      return deleteRequest(`${API_BASE}/${payload.project}/namespaces/${payload.name}`);
     },
     onSuccess: (_data, variables) => {
       queryClient.invalidateQueries({ queryKey: ['catalog', 'namespaces', variables.project] });
@@ -615,7 +491,7 @@ export function useDeleteNamespace() {
   });
 }
 
-// --- Delete Table (Catalog API) ---
+// --- Delete Table (Iceberg extension) ---
 
 export function useDeleteTable() {
   const queryClient = useQueryClient();
@@ -623,7 +499,7 @@ export function useDeleteTable() {
   return useMutation({
     mutationFn: async (payload: { project: string; namespace: string; name: string }) => {
       return deleteRequest(
-        `${collectionPath(payload.project, payload.namespace)}/tables/${payload.name}`,
+        `${genericTablesPath(payload.project, payload.namespace)}/${payload.name}`,
       );
     },
     onSuccess: (_data, variables) => {
@@ -633,7 +509,7 @@ export function useDeleteTable() {
   });
 }
 
-// --- Delete Volume (Catalog API) ---
+// --- Delete Volume (Iceberg extension) ---
 
 export function useDeleteVolume() {
   const queryClient = useQueryClient();
@@ -641,29 +517,11 @@ export function useDeleteVolume() {
   return useMutation({
     mutationFn: async (payload: { project: string; namespace: string; name: string }) => {
       return deleteRequest(
-        `${collectionPath(payload.project, payload.namespace)}/volumes/${payload.name}`,
+        `${volumesPath(payload.project, payload.namespace)}/${payload.name}`,
       );
     },
     onSuccess: (_data, variables) => {
       queryClient.invalidateQueries({ queryKey: ['catalog', 'tables-and-volumes', variables.project, variables.namespace] });
-      queryClient.invalidateQueries({ queryKey: ['catalog', 'collections', variables.project] });
-    },
-  });
-}
-
-// --- Delete Database (Catalog API) ---
-
-export function useDeleteDatabase() {
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: async (payload: { project: string; collection: string; name: string }) => {
-      return deleteRequest(
-        `${collectionPath(payload.project, payload.collection)}/databases/${payload.name}`,
-      );
-    },
-    onSuccess: (_data, variables) => {
-      queryClient.invalidateQueries({ queryKey: ['catalog', 'databases', variables.project, variables.collection] });
       queryClient.invalidateQueries({ queryKey: ['catalog', 'collections', variables.project] });
     },
   });
@@ -692,7 +550,7 @@ export function useUpdateTable() {
         updates.push({ action: 'remove-properties', removals: payload.removeProperties });
       }
       return postJson(
-        `${namespacePath(payload.project, payload.namespace)}/tables/${payload.name}`,
+        `${icebergTablesPath(payload.project, payload.namespace)}/${payload.name}`,
         { updates },
       );
     },
@@ -702,7 +560,7 @@ export function useUpdateTable() {
   });
 }
 
-// --- Update Volume (Catalog API) ---
+// --- Update Volume (Iceberg extension) ---
 
 export interface UpdateVolumePayload {
   project: string;
@@ -723,7 +581,7 @@ export function useUpdateVolume() {
       if (payload.properties) body.properties = payload.properties;
       if (payload.storageLocation) body.storage_location = payload.storageLocation;
       return putJson(
-        `${collectionPath(payload.project, payload.namespace)}/volumes/${payload.name}`,
+        `${volumesPath(payload.project, payload.namespace)}/${payload.name}`,
         body,
       );
     },

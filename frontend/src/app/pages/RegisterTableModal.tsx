@@ -26,7 +26,7 @@ interface RegisterTableModalProps {
   onClose: () => void;
 }
 
-const FORMAT_OPTIONS = ['iceberg', 'parquet', 'delta', 'csv'];
+const FORMAT_OPTIONS = ['iceberg', 'parquet', 'delta', 'csv', 'postgresql', 'mysql', 'snowflake', 'mssql', 'mongodb'];
 const COLUMN_TYPE_OPTIONS = [
   'string', 'integer', 'long', 'float', 'double',
   'decimal', 'boolean', 'date', 'timestamp', 'binary',
@@ -45,6 +45,7 @@ const RegisterTableModal: React.FC<RegisterTableModalProps> = ({
   const [location, setLocation] = React.useState('');
   const [columns, setColumns] = React.useState<Array<{ name: string; type: string; description: string; nullable: boolean }>>([]);
   const [error, setError] = React.useState('');
+  const [accessMode, setAccessMode] = React.useState<'connection' | 'location'>('connection');
 
   // Properties state
   const [purpose, setPurpose] = React.useState('');
@@ -107,6 +108,8 @@ const RegisterTableModal: React.FC<RegisterTableModalProps> = ({
     if (agentTags) properties.agent_tags = agentTags;
     Object.assign(properties, customTagsMap);
 
+    const effectiveLocation = accessMode === 'location' ? location : '';
+
     try {
       const schemaFields = columns
         .filter((c) => c.name.trim())
@@ -124,8 +127,8 @@ const RegisterTableModal: React.FC<RegisterTableModalProps> = ({
         description,
         format,
         volumeType: '',
-        location,
-        connectionRef,
+        location: effectiveLocation,
+        connectionRef: accessMode === 'connection' ? connectionRef : '',
         tags: {},
         isVolume: false,
         schemaFields: schemaFields.length > 0 ? schemaFields : undefined,
@@ -179,31 +182,50 @@ const RegisterTableModal: React.FC<RegisterTableModalProps> = ({
             </FormSelect>
           </FormGroup>
 
-          <FormGroup label="Connection" fieldId="table-connection">
-            <FormSelect
-              id="table-connection"
-              value={connectionRef}
-              onChange={(_event, val) => setConnectionRef(val)}
-            >
-              <FormSelectOption value="" label="None — use storage location" />
-              {connections.map((c) => (
-                <FormSelectOption
-                  key={c.name}
-                  value={c.name}
-                  label={`${c.displayName} (${c.connectionType})`}
-                />
-              ))}
-            </FormSelect>
+          <FormGroup label="Data access" fieldId="access-mode">
+            <Flex>
+              <FlexItem>
+                <Button variant={accessMode === 'connection' ? 'primary' : 'secondary'} onClick={() => setAccessMode('connection')}>
+                  Data Connection
+                </Button>
+              </FlexItem>
+              <FlexItem>
+                <Button variant={accessMode === 'location' ? 'primary' : 'secondary'} onClick={() => setAccessMode('location')}>
+                  Storage location
+                </Button>
+              </FlexItem>
+            </Flex>
           </FormGroup>
 
-          <FormGroup label="Storage location (S3 URI)" fieldId="table-location">
-            <TextInput
-              id="table-location"
-              value={location}
-              onChange={(_event, val) => setLocation(val)}
-              placeholder="s3://bucket/path"
-            />
-          </FormGroup>
+          {accessMode === 'connection' && (
+            <FormGroup label="Connection" fieldId="table-connection">
+              <FormSelect
+                id="table-connection"
+                value={connectionRef}
+                onChange={(_event, val) => setConnectionRef(val)}
+              >
+                <FormSelectOption value="" label="Select a connection" />
+                {connections.map((c) => (
+                  <FormSelectOption
+                    key={c.name}
+                    value={c.name}
+                    label={`${c.displayName} (${c.connectionType})`}
+                  />
+                ))}
+              </FormSelect>
+            </FormGroup>
+          )}
+
+          {accessMode === 'location' && (
+            <FormGroup label="Storage location (S3 URI)" fieldId="table-location">
+              <TextInput
+                id="table-location"
+                value={location}
+                onChange={(_event, val) => setLocation(val)}
+                placeholder="s3://bucket/path"
+              />
+            </FormGroup>
+          )}
 
           <FormGroup label="Schema (columns)" fieldId="table-columns">
             {columns.map((col, i) => (

@@ -1,8 +1,7 @@
 import React from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Routes, Route, Navigate } from 'react-router-dom';
-import CollectionsPage from '../app/pages/CollectionsPage';
-import CollectionDetailPage from '../app/pages/CollectionDetailPage';
+import DataRegistryPage from '../app/pages/DataRegistryPage';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -17,8 +16,7 @@ const queryClient = new QueryClient({
 const DataHubWrapper: React.FC = () => (
   <QueryClientProvider client={queryClient}>
     <Routes>
-      <Route path="collections/:name" element={<CollectionDetailPage />} />
-      <Route path="collections" element={<CollectionsPage />} />
+      <Route path="collections" element={<DataRegistryPage />} />
       <Route path="connections" element={<Navigate to="/ai-hub/data/collections?tab=connections" replace />} />
       <Route path="*" element={<Navigate to="collections" replace />} />
     </Routes>

@@ -52,9 +52,7 @@ const RegisterTableModal: React.FC<RegisterTableModalProps> = ({
   const [license, setLicense] = React.useState('');
   const [maturity, setMaturity] = React.useState('');
   const [domain, setDomain] = React.useState('');
-  const [owner, setOwner] = React.useState('');
   const [pii, setPii] = React.useState('');
-  const [agentTags, setAgentTags] = React.useState('');
 
   // Custom properties (key/value pairs)
   const [customKey, setCustomKey] = React.useState('');
@@ -103,9 +101,7 @@ const RegisterTableModal: React.FC<RegisterTableModalProps> = ({
     if (license) properties.license = license;
     if (maturity) properties.maturity = maturity;
     if (domain) properties.domain = domain;
-    if (owner) properties.owner = owner;
     if (pii) properties.pii = pii;
-    if (agentTags) properties.agent_tags = agentTags;
     Object.assign(properties, customTagsMap);
 
     const effectiveLocation = accessMode === 'location' ? location : '';
@@ -331,15 +327,6 @@ const RegisterTableModal: React.FC<RegisterTableModalProps> = ({
             />
           </FormGroup>
 
-          <FormGroup label="Owner" fieldId="table-owner">
-            <TextInput
-              id="table-owner"
-              value={owner}
-              onChange={(_event, val) => setOwner(val)}
-              placeholder="e.g. underwriting-team"
-            />
-          </FormGroup>
-
           <FormGroup label="PII" fieldId="table-pii">
             <FormSelect
               id="table-pii"
@@ -351,15 +338,6 @@ const RegisterTableModal: React.FC<RegisterTableModalProps> = ({
               <FormSelectOption value="true" label="true" />
               <FormSelectOption value="unknown" label="unknown" />
             </FormSelect>
-          </FormGroup>
-
-          <FormGroup label="Agent tags" fieldId="table-agent-tags">
-            <TextInput
-              id="table-agent-tags"
-              value={agentTags}
-              onChange={(_event, val) => setAgentTags(val)}
-              placeholder="e.g. risk, insurance, policies (comma-separated)"
-            />
           </FormGroup>
 
           <FormGroup label="Custom properties" fieldId="table-custom-props">

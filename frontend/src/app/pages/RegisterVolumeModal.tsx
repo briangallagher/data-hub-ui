@@ -44,8 +44,6 @@ const RegisterVolumeModal: React.FC<RegisterVolumeModalProps> = ({
   const [license, setLicense] = React.useState('');
   const [maturity, setMaturity] = React.useState('');
   const [domain, setDomain] = React.useState('');
-  const [owner, setOwner] = React.useState('');
-  const [agentTags, setAgentTags] = React.useState('');
 
   // Custom properties (key/value pairs)
   const [customKey, setCustomKey] = React.useState('');
@@ -90,8 +88,6 @@ const RegisterVolumeModal: React.FC<RegisterVolumeModalProps> = ({
     if (license) properties.license = license;
     if (maturity) properties.maturity = maturity;
     if (domain) properties.domain = domain;
-    if (owner) properties.owner = owner;
-    if (agentTags) properties.agent_tags = agentTags;
     Object.assign(properties, customTagsMap);
 
     try {
@@ -263,24 +259,6 @@ const RegisterVolumeModal: React.FC<RegisterVolumeModalProps> = ({
               value={domain}
               onChange={(_event, val) => setDomain(val)}
               placeholder="e.g. insurance, finance, healthcare"
-            />
-          </FormGroup>
-
-          <FormGroup label="Owner" fieldId="volume-owner">
-            <TextInput
-              id="volume-owner"
-              value={owner}
-              onChange={(_event, val) => setOwner(val)}
-              placeholder="e.g. underwriting-team"
-            />
-          </FormGroup>
-
-          <FormGroup label="Agent tags" fieldId="volume-agent-tags">
-            <TextInput
-              id="volume-agent-tags"
-              value={agentTags}
-              onChange={(_event, val) => setAgentTags(val)}
-              placeholder="e.g. risk, insurance, policies (comma-separated)"
             />
           </FormGroup>
 

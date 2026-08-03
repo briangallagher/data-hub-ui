@@ -214,15 +214,36 @@ export function useCollections(project: string) {
     queryKey: ['catalog', 'collections', project],
     queryFn: async (): Promise<CollectionInfo[]> => {
       const data = await fetchJson<IcebergNamespacesResponse>(namespacesPath(project));
-      return (data.namespaces || []).map((ns) => ({
-        name: ns[0] || 'default',
-        project,
-        description: '',
-        tableCount: 0,
-        volumeCount: 0,
-        createdDate: '',
-        properties: {},
-      }));
+      const collections = await Promise.all(
+        (data.namespaces || []).map(async (ns) => {
+          const name = ns[0] || 'default';
+          let description = '';
+          let tableCount = 0;
+          let volumeCount = 0;
+          let properties: Record<string, string> = {};
+          try {
+            const props = await fetchJson<{ properties: Record<string, string> }>(
+              `${namespacesPath(project)}/${name}/properties`,
+            );
+            description = props.properties?.description || '';
+            properties = props.properties || {};
+          } catch { /* ignore */ }
+          try {
+            const tables = await fetchJson<CatalogAssetsResponse>(
+              genericTablesPath(project, name),
+            );
+            tableCount = (tables.assets || []).length;
+          } catch { /* ignore */ }
+          try {
+            const vols = await fetchJson<{ volumes: unknown[] }>(
+              volumesPath(project, name),
+            );
+            volumeCount = (vols.volumes || []).length;
+          } catch { /* ignore */ }
+          return { name, project, description, tableCount, volumeCount, createdDate: '', properties };
+        }),
+      );
+      return collections;
     },
     enabled: !!project,
   });

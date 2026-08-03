@@ -14,8 +14,11 @@ import {
   Alert,
   Flex,
   FlexItem,
+  Content,
+  Popover,
   Title,
 } from '@patternfly/react-core';
+import { PlusCircleIcon, MinusCircleIcon, OutlinedQuestionCircleIcon } from '@patternfly/react-icons';
 import { useUpdateTable } from './useCatalogApi';
 
 interface EditTableModalProps {
@@ -40,37 +43,31 @@ const EditTableModal: React.FC<EditTableModalProps> = ({
 }) => {
   const [description, setDescription] = React.useState(currentDescription || '');
 
-  // Structured property fields (pre-populated from existing properties)
   const [purpose, setPurpose] = React.useState(currentProperties.purpose || '');
   const [license, setLicense] = React.useState(currentProperties.license || '');
   const [maturity, setMaturity] = React.useState(currentProperties.maturity || '');
   const [domain, setDomain] = React.useState(currentProperties.domain || '');
-  const [owner, setOwner] = React.useState(currentProperties.owner || '');
   const [pii, setPii] = React.useState(currentProperties.pii || '');
-  const [agentTags, setAgentTags] = React.useState(currentProperties.agent_tags || '');
 
-  // Custom properties (key/value pairs, excluding internal and known property keys)
-  const [tags, setTags] = React.useState<Array<{ key: string; value: string }>>(
+  const [customProps, setCustomProps] = React.useState<Array<{ key: string; value: string }>>(
     Object.entries(currentProperties)
       .filter(([k]) => !INTERNAL_KEYS.includes(k) && !KNOWN_PROPERTY_KEYS.includes(k))
       .map(([key, value]) => ({ key, value })),
   );
-  const [tagKey, setTagKey] = React.useState('');
-  const [tagValue, setTagValue] = React.useState('');
   const [error, setError] = React.useState('');
 
   const updateMutation = useUpdateTable();
 
-  const handleAddTag = () => {
-    if (tagKey.trim()) {
-      setTags([...tags, { key: tagKey.trim(), value: tagValue.trim() }]);
-      setTagKey('');
-      setTagValue('');
-    }
+  const handleAddProperty = () => {
+    setCustomProps([...customProps, { key: '', value: '' }]);
   };
 
-  const handleRemoveTag = (index: number) => {
-    setTags(tags.filter((_, i) => i !== index));
+  const handlePropertyChange = (index: number, field: 'key' | 'value', val: string) => {
+    setCustomProps(customProps.map((p, i) => (i === index ? { ...p, [field]: val } : p)));
+  };
+
+  const handleRemoveProperty = (index: number) => {
+    setCustomProps(customProps.filter((_, i) => i !== index));
   };
 
   const handleSubmit = async () => {
@@ -82,28 +79,23 @@ const EditTableModal: React.FC<EditTableModalProps> = ({
       newProps.description = description;
     }
 
-    // Add structured properties
     if (purpose) newProps.purpose = purpose;
     if (license) newProps.license = license;
     if (maturity) newProps.maturity = maturity;
     if (domain) newProps.domain = domain;
-    if (owner) newProps.owner = owner;
     if (pii) newProps.pii = pii;
-    if (agentTags) newProps.agent_tags = agentTags;
 
-    // Add custom tags
-    tags.forEach((t) => { newProps[t.key] = t.value; });
+    customProps.forEach((p) => {
+      if (p.key.trim()) newProps[p.key.trim()] = p.value.trim();
+    });
 
-    // Calculate removed keys (old user-editable keys not present in new set)
     const allNewKeys = new Set<string>();
     if (purpose) allNewKeys.add('purpose');
     if (license) allNewKeys.add('license');
     if (maturity) allNewKeys.add('maturity');
     if (domain) allNewKeys.add('domain');
-    if (owner) allNewKeys.add('owner');
     if (pii) allNewKeys.add('pii');
-    if (agentTags) allNewKeys.add('agent_tags');
-    tags.forEach((t) => allNewKeys.add(t.key));
+    customProps.forEach((p) => { if (p.key.trim()) allNewKeys.add(p.key.trim()); });
 
     const oldEditableKeys = Object.keys(currentProperties).filter(
       (k) => !INTERNAL_KEYS.includes(k) && k !== 'registered_by' && k !== 'created_at',
@@ -196,15 +188,6 @@ const EditTableModal: React.FC<EditTableModalProps> = ({
             />
           </FormGroup>
 
-          <FormGroup label="Owner" fieldId="edit-table-owner">
-            <TextInput
-              id="edit-table-owner"
-              value={owner}
-              onChange={(_event, val) => setOwner(val)}
-              placeholder="e.g. underwriting-team"
-            />
-          </FormGroup>
-
           <FormGroup label="PII" fieldId="edit-table-pii">
             <FormSelect
               id="edit-table-pii"
@@ -218,62 +201,59 @@ const EditTableModal: React.FC<EditTableModalProps> = ({
             </FormSelect>
           </FormGroup>
 
-          <FormGroup label="Agent tags" fieldId="edit-table-agent-tags">
-            <TextInput
-              id="edit-table-agent-tags"
-              value={agentTags}
-              onChange={(_event, val) => setAgentTags(val)}
-              placeholder="e.g. risk, insurance, policies (comma-separated)"
-            />
-          </FormGroup>
-
-          <FormGroup label="Custom properties" fieldId="edit-table-tags">
-            <Flex>
-              <FlexItem>
-                <TextInput
-                  id="edit-tag-key"
-                  value={tagKey}
-                  onChange={(_event, val) => setTagKey(val)}
-                  placeholder="Key"
-                  style={{ width: '160px' }}
-                />
-              </FlexItem>
-              <FlexItem>
-                <TextInput
-                  id="edit-tag-value"
-                  value={tagValue}
-                  onChange={(_event, val) => setTagValue(val)}
-                  placeholder="Value"
-                  style={{ width: '160px' }}
-                />
-              </FlexItem>
-              <FlexItem>
-                <Button variant="secondary" onClick={handleAddTag}>
-                  Add
+          <FormGroup
+            label="Custom properties"
+            fieldId="edit-table-properties"
+            labelHelp={
+              <Popover
+                bodyContent="Properties are optional key/value pairs for organizing data assets. They help you filter and find assets but don't affect access or permissions."
+              >
+                <Button variant="plain" aria-label="More info about properties" style={{ padding: 0 }}>
+                  <OutlinedQuestionCircleIcon color="var(--pf-t--global--text--color--subtle)" />
                 </Button>
-              </FlexItem>
-            </Flex>
-            {tags.length > 0 && (
-              <div style={{ marginTop: '8px' }}>
-                {tags.map((tag, i) => (
-                  <div key={i} style={{ display: 'flex', gap: '8px', marginBottom: '4px', alignItems: 'center' }}>
-                    <span style={{ fontSize: '13px', fontWeight: 500 }}>{tag.key}:</span>
-                    <TextInput
-                      value={tag.value}
-                      onChange={(_event, val) => {
-                        const updated = [...tags];
-                        updated[i] = { ...updated[i], value: val };
-                        setTags(updated);
-                      }}
-                      style={{ width: '200px' }}
-                    />
-                    <Button variant="plain" onClick={() => handleRemoveTag(i)} style={{ padding: '2px' }}>
-                      ×
-                    </Button>
-                  </div>
+              </Popover>
+            }
+          >
+            <Content component="p" style={{ color: '#6a6e73', marginBottom: '12px' }}>
+              Optionally, add key/value pair properties to help organize and filter data assets.
+            </Content>
+            {customProps.length > 0 && (
+              <div style={{ marginBottom: '8px' }}>
+                <Flex style={{ marginBottom: '4px' }}>
+                  <FlexItem style={{ flex: 1 }}><span style={{ color: 'var(--pf-t--global--text--color--subtle)' }}>Key</span></FlexItem>
+                  <FlexItem style={{ flex: 1 }}><span style={{ color: 'var(--pf-t--global--text--color--subtle)' }}>Value</span></FlexItem>
+                  <FlexItem style={{ width: '36px' }} />
+                </Flex>
+                {customProps.map((prop, i) => (
+                  <Flex key={i} style={{ marginBottom: '8px' }} alignItems={{ default: 'alignItemsCenter' }}>
+                    <FlexItem style={{ flex: 1 }}>
+                      <TextInput
+                        id={`edit-prop-key-${i}`}
+                        value={prop.key}
+                        onChange={(_event, val) => handlePropertyChange(i, 'key', val)}
+                        placeholder="Example: domain"
+                      />
+                    </FlexItem>
+                    <FlexItem style={{ flex: 1 }}>
+                      <TextInput
+                        id={`edit-prop-value-${i}`}
+                        value={prop.value}
+                        onChange={(_event, val) => handlePropertyChange(i, 'value', val)}
+                        placeholder="Example: underwriting"
+                      />
+                    </FlexItem>
+                    <FlexItem style={{ width: '36px' }}>
+                      <Button variant="plain" onClick={() => handleRemoveProperty(i)} aria-label="Remove property">
+                        <MinusCircleIcon />
+                      </Button>
+                    </FlexItem>
+                  </Flex>
                 ))}
               </div>
             )}
+            <Button variant="link" isInline icon={<PlusCircleIcon />} onClick={handleAddProperty}>
+              Add property
+            </Button>
           </FormGroup>
         </Form>
       </ModalBody>

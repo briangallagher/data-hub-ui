@@ -23,14 +23,24 @@ export const useAdminSettings = (): NavDataItem[] => {
 };
 
 export const useNavData = (): NavDataItem[] => {
-  const baseNavItems = [
+  const baseNavItems: NavDataItem[] = [
+    { label: 'Home', path: '/' },
+    { label: 'Projects', path: '/projects' },
     {
-      label: 'Data Registry',
-      path: '/ai-hub/data/collections',
+      label: 'AI hub',
+      children: [
+        { label: 'Models', path: '/models' },
+        { label: 'Data Registry', path: '/ai-hub/data/collections' },
+      ],
     },
     {
-      label: 'Main View',
-      path: '/main-view',
+      label: 'Develop & train',
+      children: [{ label: 'Notebooks', path: '/notebooks' }],
+    },
+    { label: 'Learning resources', path: '/learning-resources' },
+    {
+      label: 'Applications',
+      children: [{ label: 'Enabled', path: '/applications' }],
     },
   ];
 
@@ -44,6 +54,11 @@ const AppRoutes: React.FC = () => {
     <Routes>
       <Route path="/" element={<Navigate to="/ai-hub/data/collections" replace />} />
       <Route path="/ai-hub/data/*" element={<DataHubWrapper />} />
+      <Route path="/projects" element={<MainPage />} />
+      <Route path="/models" element={<MainPage />} />
+      <Route path="/notebooks" element={<MainPage />} />
+      <Route path="/learning-resources" element={<MainPage />} />
+      <Route path="/applications" element={<MainPage />} />
       <Route path="/main-view/*" element={<MainPage />} />
       <Route path="*" element={<NotFound />} />
       {clusterAdmin && <Route path="/main-view-settings/*" element={<SettingsMainPage />} />}

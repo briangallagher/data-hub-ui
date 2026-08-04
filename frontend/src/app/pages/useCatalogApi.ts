@@ -373,6 +373,29 @@ export function useTableDetail(project: string, namespace: string, name: string)
   });
 }
 
+export function useVolumeDetail(project: string, namespace: string, name: string) {
+  return useQuery({
+    queryKey: ['catalog', 'volume-detail', project, namespace, name],
+    queryFn: async (): Promise<CatalogAsset> => {
+      const v = await fetchJson<any>(`${volumesPath(project, namespace)}/${name}`);
+      return {
+        name: v.name,
+        asset_type: 'volume',
+        description: v.comment || v.properties?.description || '',
+        format: '',
+        volume_type: v['volume-type'] || 'EXTERNAL',
+        location: v['storage-location'] || '',
+        connection_ref: v.properties?.['connection-ref'] || '',
+        tags: {},
+        properties: v.properties || {},
+        uuid: '',
+        collection: namespace,
+      };
+    },
+    enabled: !!project && !!namespace && !!name,
+  });
+}
+
 // --- Connections (BFF — unchanged) ---
 
 export function useConnections(namespace: string) {

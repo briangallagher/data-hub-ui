@@ -79,12 +79,14 @@ import {
   useK8sNamespaces,
   useCollections,
   fetchTablesAndVolumes,
+  useTablesAndVolumes,
   useConnections,
   useCreateNamespace,
   useDeleteNamespace,
   useDeleteTable,
   useDeleteVolume,
   useTableDetail,
+  useVolumeDetail,
   type CollectionInfo,
   type TableAsset,
   type DataConnection,
@@ -110,12 +112,15 @@ const DataRegistryPage: React.FC = () => {
   const location = useLocation();
   const pathPrefix = '/ai-hub/data/';
   const subPath = location.pathname.startsWith(pathPrefix) ? location.pathname.slice(pathPrefix.length) : '';
-  const collectionMatch = subPath.match(/^collections\/([^/]+)\/([^/]+)$/);
+  const assetDetailMatch = subPath.match(/^collections\/([^/]+)\/([^/]+)$/);
+  const collectionDetailMatch = subPath.match(/^collections\/([^/]+)$/);
   const connectionMatch = subPath.match(/^connections\/([^/]+)$/);
-  const detailNamespace = collectionMatch?.[1];
-  const detailAssetName = collectionMatch?.[2];
+  const detailNamespace = assetDetailMatch?.[1];
+  const detailAssetName = assetDetailMatch?.[2];
+  const detailCollectionName = collectionDetailMatch?.[1];
   const detailConnectionName = connectionMatch?.[1];
   const isDetailView = !!(detailNamespace && detailAssetName);
+  const isCollectionDetailView = !!detailCollectionName;
   const isConnectionDetailView = !!detailConnectionName;
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
@@ -158,7 +163,9 @@ const DataRegistryPage: React.FC = () => {
   const connectionsQuery = useConnections(selectedProject);
   const connections: DataConnection[] = connectionsQuery.data || [];
 
-  const detailQuery = useTableDetail(selectedProject, detailNamespace || '', detailAssetName || '');
+  const tableDetailQuery = useTableDetail(selectedProject, detailNamespace || '', isDetailView && !isVolume ? detailAssetName || '' : '');
+  const volumeDetailQuery = useVolumeDetail(selectedProject, detailNamespace || '', isDetailView && isVolume ? detailAssetName || '' : '');
+  const detailQuery = isVolume ? volumeDetailQuery : tableDetailQuery;
 
   const createNamespace = useCreateNamespace();
   const deleteNamespace = useDeleteNamespace();
@@ -352,6 +359,17 @@ const DataRegistryPage: React.FC = () => {
                 }}
                 onDelete={() => setDeleteTarget({ name: detailAssetName!, namespace: detailNamespace!, isVolume })}
               />
+            ) : isCollectionDetailView ? (
+              <CollectionDetailContent
+                project={selectedProject}
+                collectionName={detailCollectionName!}
+                collections={collections}
+                onDeleteCollection={() => {
+                  deleteNamespace.mutateAsync({ project: selectedProject, name: detailCollectionName! }).then(() => {
+                    navigate(`/ai-hub/data/collections?project=${selectedProject}&tab=assets`);
+                  });
+                }}
+              />
             ) : !selectedProject ? (
               <PageSection>
                 <EmptyState titleText="Select a project" icon={() => null}>
@@ -511,10 +529,11 @@ const DataRegistryPage: React.FC = () => {
                   <Table aria-label="Data assets" variant="compact">
                     <Thead>
                       <Tr>
-                        <Th width={25}>Name</Th>
+                        <Th width={20}>Name</Th>
+                        <Th width={10}>Collection</Th>
                         <Th width={10}>Asset type</Th>
                         <Th width={10}>Format</Th>
-                        <Th width={20}>Storage location</Th>
+                        <Th width={15}>Storage location</Th>
                         <Th width={10}>Connections</Th>
                         <Th width={15}>Tags</Th>
                         <Th width={10} />
@@ -535,6 +554,11 @@ const DataRegistryPage: React.FC = () => {
                                   {asset.description.length > 80 ? `${asset.description.substring(0, 80)}...` : asset.description}
                                 </div>
                               )}
+                            </Td>
+                            <Td dataLabel="Collection">
+                              <Link to={`/ai-hub/data/collections/${asset.namespace}?project=${selectedProject}`}>
+                                {asset.namespace}
+                              </Link>
                             </Td>
                             <Td dataLabel="Asset type">
                               {asset.isVolume ? 'Volume' : 'Table'}
@@ -735,6 +759,11 @@ const AssetDetailContent: React.FC<{
               Data Registry &ndash; {project}
             </Link>
           </BreadcrumbItem>
+          <BreadcrumbItem>
+            <Link to={`/ai-hub/data/collections/${namespace}?project=${project}`}>
+              {namespace}
+            </Link>
+          </BreadcrumbItem>
           <BreadcrumbItem isActive>{assetName}</BreadcrumbItem>
         </Breadcrumb>
         <Flex justifyContent={{ default: 'justifyContentSpaceBetween' }} alignItems={{ default: 'alignItemsCenter' }} style={{ marginTop: '12px' }}>
@@ -824,7 +853,9 @@ const AssetDetailContent: React.FC<{
                         )}
                         <DescriptionListGroup>
                           <DescriptionListTerm>Collection</DescriptionListTerm>
-                          <DescriptionListDescription>{namespace}</DescriptionListDescription>
+                          <DescriptionListDescription>
+                            <Link to={`/ai-hub/data/collections/${namespace}?project=${project}`}>{namespace}</Link>
+                          </DescriptionListDescription>
                         </DescriptionListGroup>
                       </DescriptionList>
                     </CardBody>
@@ -868,6 +899,263 @@ const AssetDetailContent: React.FC<{
           </Tab>
         </Tabs>
       </PageSection>
+    </>
+  );
+};
+
+const CollectionDetailContent: React.FC<{
+  project: string;
+  collectionName: string;
+  collections: CollectionInfo[];
+  onDeleteCollection: () => void;
+}> = ({ project, collectionName, collections, onDeleteCollection }) => {
+  const [kebabOpen, setKebabOpen] = React.useState(false);
+  const [deleteOpen, setDeleteOpen] = React.useState(false);
+  const [deleteConfirmText, setDeleteConfirmText] = React.useState('');
+  const [openAssetKebab, setOpenAssetKebab] = React.useState<string | null>(null);
+  const [editTarget, setEditTarget] = React.useState<TableAsset | null>(null);
+  const [deleteAssetTarget, setDeleteAssetTarget] = React.useState<{ name: string; namespace: string; isVolume: boolean } | null>(null);
+  const [deleteAssetConfirm, setDeleteAssetConfirm] = React.useState('');
+  const navigate = useNavigate();
+  const deleteTable = useDeleteTable();
+  const deleteVolume = useDeleteVolume();
+
+  const collection = collections.find((c) => c.name === collectionName);
+  const assetsQuery = useTablesAndVolumes(project, collectionName);
+  const assets = assetsQuery.data || [];
+
+  const handleDeleteAsset = async () => {
+    if (!deleteAssetTarget) return;
+    try {
+      if (deleteAssetTarget.isVolume) {
+        await deleteVolume.mutateAsync({ project, namespace: deleteAssetTarget.namespace, name: deleteAssetTarget.name });
+      } else {
+        await deleteTable.mutateAsync({ project, namespace: deleteAssetTarget.namespace, name: deleteAssetTarget.name });
+      }
+    } finally {
+      setDeleteAssetTarget(null);
+      setDeleteAssetConfirm('');
+    }
+  };
+
+  return (
+    <>
+      <PageSection style={{ paddingBottom: 0 }}>
+        <Breadcrumb>
+          <BreadcrumbItem>
+            <Link to={`/ai-hub/data/collections?project=${project}&tab=assets`}>
+              Data Registry &ndash; {project}
+            </Link>
+          </BreadcrumbItem>
+          <BreadcrumbItem isActive>{collectionName}</BreadcrumbItem>
+        </Breadcrumb>
+        <Flex justifyContent={{ default: 'justifyContentSpaceBetween' }} alignItems={{ default: 'alignItemsCenter' }} style={{ marginTop: '12px' }}>
+          <FlexItem>
+            <Title headingLevel="h1" size="2xl">{collectionName}</Title>
+            {collection?.description && (
+              <Content component="p" style={{ color: '#6a6e73', marginTop: '4px' }}>{collection.description}</Content>
+            )}
+          </FlexItem>
+          <FlexItem>
+            <Dropdown
+              isOpen={kebabOpen}
+              onOpenChange={setKebabOpen}
+              toggle={(toggleRef) => (
+                <MenuToggle ref={toggleRef} variant="plain" onClick={() => setKebabOpen(!kebabOpen)} isExpanded={kebabOpen}>
+                  <EllipsisVIcon />
+                </MenuToggle>
+              )}
+              popperProps={{ position: 'right' }}
+            >
+              <DropdownList>
+                <DropdownItem key="delete" onClick={() => { setKebabOpen(false); setDeleteOpen(true); }}>Delete collection</DropdownItem>
+              </DropdownList>
+            </Dropdown>
+          </FlexItem>
+        </Flex>
+      </PageSection>
+
+      <PageSection>
+        <Grid hasGutter>
+          <GridItem span={8}>
+            <Card>
+              <CardTitle>Data assets ({assets.length})</CardTitle>
+              <CardBody>
+                {assetsQuery.isLoading ? (
+                  <Bullseye style={{ minHeight: '100px' }}><Spinner /></Bullseye>
+                ) : assets.length === 0 ? (
+                  <Content component="p" style={{ color: '#6a6e73' }}>No data assets in this collection.</Content>
+                ) : (
+                  <Table aria-label="Collection assets" variant="compact">
+                    <Thead>
+                      <Tr>
+                        <Th>Name</Th>
+                        <Th>Type</Th>
+                        <Th>Format</Th>
+                        <Th />
+                      </Tr>
+                    </Thead>
+                    <Tbody>
+                      {assets.map((asset) => {
+                        const rowKey = `${asset.name}-${asset.isVolume ? 'v' : 't'}`;
+                        return (
+                          <Tr key={rowKey}>
+                            <Td>
+                              <Link to={`/ai-hub/data/collections/${collectionName}/${asset.name}?project=${project}${asset.isVolume ? '&type=volume' : ''}`}>
+                                {asset.name}
+                              </Link>
+                            </Td>
+                            <Td>{asset.isVolume ? 'Volume' : 'Table'}</Td>
+                            <Td>
+                              {asset.isVolume ? (
+                                <Label isCompact variant="outline" color="grey">Unstructured</Label>
+                              ) : asset.format ? (
+                                <Label isCompact variant="outline" color={FORMAT_COLORS[asset.format] || 'grey'}>{asset.format}</Label>
+                              ) : '—'}
+                            </Td>
+                            <Td isActionCell>
+                              <Dropdown
+                                isOpen={openAssetKebab === rowKey}
+                                onOpenChange={(open) => setOpenAssetKebab(open ? rowKey : null)}
+                                toggle={(toggleRef) => (
+                                  <MenuToggle
+                                    ref={toggleRef}
+                                    variant="plain"
+                                    onClick={() => setOpenAssetKebab(openAssetKebab === rowKey ? null : rowKey)}
+                                    isExpanded={openAssetKebab === rowKey}
+                                  >
+                                    <EllipsisVIcon />
+                                  </MenuToggle>
+                                )}
+                                popperProps={{ position: 'right' }}
+                              >
+                                <DropdownList>
+                                  <DropdownItem key="edit" onClick={() => { setEditTarget(asset); setOpenAssetKebab(null); }}>
+                                    Edit
+                                  </DropdownItem>
+                                  <DropdownItem key="delete" onClick={() => {
+                                    setDeleteAssetTarget({ name: asset.name, namespace: asset.namespace, isVolume: asset.isVolume });
+                                    setOpenAssetKebab(null);
+                                  }}>
+                                    Delete
+                                  </DropdownItem>
+                                  <DropdownItem key="provenance" isDisabled>
+                                    View provenance
+                                  </DropdownItem>
+                                </DropdownList>
+                              </Dropdown>
+                            </Td>
+                          </Tr>
+                        );
+                      })}
+                    </Tbody>
+                  </Table>
+                )}
+              </CardBody>
+            </Card>
+          </GridItem>
+
+          <GridItem span={4}>
+            <Card>
+              <CardTitle>Collection details</CardTitle>
+              <CardBody>
+                <DescriptionList isHorizontal>
+                  <DescriptionListGroup>
+                    <DescriptionListTerm>Tables</DescriptionListTerm>
+                    <DescriptionListDescription>{collection?.tableCount ?? '—'}</DescriptionListDescription>
+                  </DescriptionListGroup>
+                  <DescriptionListGroup>
+                    <DescriptionListTerm>Volumes</DescriptionListTerm>
+                    <DescriptionListDescription>{collection?.volumeCount ?? '—'}</DescriptionListDescription>
+                  </DescriptionListGroup>
+                  {collection?.properties?.created_by && (
+                    <DescriptionListGroup>
+                      <DescriptionListTerm>Created by</DescriptionListTerm>
+                      <DescriptionListDescription>{collection.properties.created_by}</DescriptionListDescription>
+                    </DescriptionListGroup>
+                  )}
+                  {collection?.createdDate && (
+                    <DescriptionListGroup>
+                      <DescriptionListTerm>Created</DescriptionListTerm>
+                      <DescriptionListDescription>{collection.createdDate}</DescriptionListDescription>
+                    </DescriptionListGroup>
+                  )}
+                </DescriptionList>
+
+                {collection?.properties && Object.keys(collection.properties).filter((k) => k !== 'description' && k !== 'created_by').length > 0 && (
+                  <>
+                    <Divider style={{ marginTop: '16px', marginBottom: '16px' }} />
+                    <Title headingLevel="h4" size="md" style={{ marginBottom: '8px' }}>Properties</Title>
+                    <LabelGroup>
+                      {Object.entries(collection.properties)
+                        .filter(([k]) => k !== 'description' && k !== 'created_by')
+                        .map(([k, v]) => (
+                          <Label key={k} variant="outline">{k}: {v}</Label>
+                        ))}
+                    </LabelGroup>
+                  </>
+                )}
+              </CardBody>
+            </Card>
+          </GridItem>
+        </Grid>
+      </PageSection>
+
+      {deleteOpen && (
+        <Modal variant={ModalVariant.small} isOpen onClose={() => { setDeleteOpen(false); setDeleteConfirmText(''); }} aria-label="Delete collection">
+          <ModalHeader title="Permanently delete collection?" />
+          <ModalBody>
+            <p style={{ marginBottom: '16px' }}>
+              <strong>{collectionName}</strong> and all its data assets will be lost forever.
+            </p>
+            <FormGroup label="Type DELETE to confirm:" fieldId="delete-collection-confirm">
+              <TextInput id="delete-collection-confirm" value={deleteConfirmText} onChange={(_e, v) => setDeleteConfirmText(v)} placeholder="DELETE" />
+            </FormGroup>
+          </ModalBody>
+          <ModalFooter>
+            <Button variant="danger" isDisabled={deleteConfirmText !== 'DELETE'} onClick={() => { setDeleteOpen(false); setDeleteConfirmText(''); onDeleteCollection(); }}>Delete</Button>
+            <Button variant="link" onClick={() => { setDeleteOpen(false); setDeleteConfirmText(''); }}>Cancel</Button>
+          </ModalFooter>
+        </Modal>
+      )}
+
+      {deleteAssetTarget && (
+        <Modal variant={ModalVariant.small} isOpen onClose={() => { setDeleteAssetTarget(null); setDeleteAssetConfirm(''); }} aria-label="Delete asset">
+          <ModalHeader title={`Permanently delete ${deleteAssetTarget.isVolume ? 'volume' : 'table'}?`} />
+          <ModalBody>
+            <p style={{ marginBottom: '16px' }}><strong>{deleteAssetTarget.name}</strong> and its data will be lost forever.</p>
+            <FormGroup label="Type DELETE to confirm:" fieldId="delete-asset-confirm">
+              <TextInput id="delete-asset-confirm" value={deleteAssetConfirm} onChange={(_e, v) => setDeleteAssetConfirm(v)} placeholder="DELETE" />
+            </FormGroup>
+          </ModalBody>
+          <ModalFooter>
+            <Button variant="danger" onClick={handleDeleteAsset} isLoading={deleteTable.isPending || deleteVolume.isPending} isDisabled={deleteAssetConfirm !== 'DELETE'}>Delete</Button>
+            <Button variant="link" onClick={() => { setDeleteAssetTarget(null); setDeleteAssetConfirm(''); }}>Cancel</Button>
+          </ModalFooter>
+        </Modal>
+      )}
+
+      {editTarget && !editTarget.isVolume && (
+        <EditTableModal
+          project={project}
+          namespace={editTarget.namespace}
+          name={editTarget.name}
+          currentDescription={editTarget.description}
+          currentProperties={editTarget.properties}
+          onClose={() => setEditTarget(null)}
+        />
+      )}
+      {editTarget && editTarget.isVolume && (
+        <EditVolumeModal
+          project={project}
+          namespace={editTarget.namespace}
+          name={editTarget.name}
+          currentDescription={editTarget.description}
+          currentLocation={editTarget.location}
+          currentProperties={editTarget.properties}
+          onClose={() => setEditTarget(null)}
+        />
+      )}
     </>
   );
 };

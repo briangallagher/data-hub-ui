@@ -8,6 +8,7 @@ import {
   Button,
   Form,
   FormGroup,
+  FormSection,
   TextInput,
   TextArea,
   FormSelect,
@@ -16,9 +17,7 @@ import {
   Flex,
   FlexItem,
   Checkbox,
-  Title,
   Radio,
-  Content,
   Popover,
 } from '@patternfly/react-core';
 import { PlusCircleIcon, MinusCircleIcon, OutlinedQuestionCircleIcon } from '@patternfly/react-icons';
@@ -64,6 +63,12 @@ const RegisterDataModal: React.FC<RegisterDataModalProps> = ({
   const [accessMode, setAccessMode] = React.useState<'connection' | 'location'>('connection');
   const [columns, setColumns] = React.useState<Array<{ name: string; type: string; description: string; nullable: boolean }>>([]);
   const [error, setError] = React.useState('');
+
+  const [purpose, setPurpose] = React.useState('');
+  const [license, setLicense] = React.useState('');
+  const [maturity, setMaturity] = React.useState('');
+  const [domain, setDomain] = React.useState('');
+  const [pii, setPii] = React.useState('');
 
   const [customProps, setCustomProps] = React.useState<Array<{ key: string; value: string }>>([]);
 
@@ -111,6 +116,11 @@ const RegisterDataModal: React.FC<RegisterDataModalProps> = ({
     setError('');
 
     const properties: Record<string, string> = {};
+    if (purpose.trim()) properties.purpose = purpose.trim();
+    if (license) properties.license = license;
+    if (maturity) properties.maturity = maturity;
+    if (domain.trim()) properties.domain = domain.trim();
+    if (pii) properties.pii = pii;
     customProps.forEach((p) => {
       if (p.key.trim()) properties[p.key.trim()] = p.value.trim();
     });
@@ -223,6 +233,16 @@ const RegisterDataModal: React.FC<RegisterDataModalProps> = ({
             />
           </FormGroup>
 
+          {assetType === 'volume' && (
+            <FormGroup label="Type" fieldId="data-volume-type">
+              <TextInput
+                id="data-volume-type"
+                value="External"
+                readOnlyVariant="default"
+              />
+            </FormGroup>
+          )}
+
           {assetType === 'table' && (
             <FormGroup label="Format" fieldId="data-format" labelHelp={
                 <Popover bodyContent="The storage format of the table data. This determines how the data is serialized and which query engines can read it.">
@@ -236,20 +256,6 @@ const RegisterDataModal: React.FC<RegisterDataModalProps> = ({
               >
                 {TABLE_FORMAT_OPTIONS.map((f) => (
                   <FormSelectOption key={f} value={f} label={f} />
-                ))}
-              </FormSelect>
-            </FormGroup>
-          )}
-
-          {assetType === 'volume' && (
-            <FormGroup label="Content type" fieldId="data-content-type">
-              <FormSelect
-                id="data-content-type"
-                value={contentType}
-                onChange={(_event, val) => setContentType(val)}
-              >
-                {CONTENT_TYPE_OPTIONS.map((o) => (
-                  <FormSelectOption key={o.value} value={o.value} label={o.label} />
                 ))}
               </FormSelect>
             </FormGroup>
@@ -311,6 +317,20 @@ const RegisterDataModal: React.FC<RegisterDataModalProps> = ({
                   ? 'e.g. s3://bucket/path, https://huggingface.co/datasets/...'
                   : 's3://bucket/path'}
               />
+            </FormGroup>
+          )}
+
+          {assetType === 'volume' && (
+            <FormGroup label="Content type" fieldId="data-content-type">
+              <FormSelect
+                id="data-content-type"
+                value={contentType}
+                onChange={(_event, val) => setContentType(val)}
+              >
+                {CONTENT_TYPE_OPTIONS.map((o) => (
+                  <FormSelectOption key={o.value} value={o.value} label={o.label} />
+                ))}
+              </FormSelect>
             </FormGroup>
           )}
 
@@ -380,22 +400,70 @@ const RegisterDataModal: React.FC<RegisterDataModalProps> = ({
             </FormGroup>
           )}
 
-          <FormGroup
-            label="Properties"
-            fieldId="data-properties"
-            labelHelp={
-              <Popover
-                bodyContent="Properties are optional key/value pairs for organizing data assets. They help you filter and find assets but don't affect access or permissions."
-              >
-                <Button variant="plain" aria-label="More info about properties" style={{ padding: 0 }}>
-                  <OutlinedQuestionCircleIcon color="var(--pf-t--global--text--color--subtle)" />
-                </Button>
-              </Popover>
-            }
-          >
-            <Content component="p" style={{ color: '#6a6e73', marginBottom: '12px' }}>
-              Optionally, add key/value pair properties to help organize and filter data assets.
-            </Content>
+          <FormSection title="Properties">
+
+          <FormGroup label="Purpose" fieldId="data-purpose">
+            <TextInput
+              id="data-purpose"
+              value={purpose}
+              onChange={(_event, val) => setPurpose(val)}
+              placeholder="e.g. ML training and fraud detection"
+            />
+          </FormGroup>
+
+          <FormGroup label="License" fieldId="data-license">
+            <FormSelect
+              id="data-license"
+              value={license}
+              onChange={(_event, val) => setLicense(val)}
+            >
+              <FormSelectOption value="" label="Select license" />
+              <FormSelectOption value="internal-use" label="internal-use" />
+              <FormSelectOption value="cc-by-4.0" label="cc-by-4.0" />
+              <FormSelectOption value="apache-2.0" label="apache-2.0" />
+              <FormSelectOption value="proprietary" label="proprietary" />
+              <FormSelectOption value="restricted" label="restricted" />
+            </FormSelect>
+          </FormGroup>
+
+          <FormGroup label="Maturity" fieldId="data-maturity">
+            <FormSelect
+              id="data-maturity"
+              value={maturity}
+              onChange={(_event, val) => setMaturity(val)}
+            >
+              <FormSelectOption value="" label="Select maturity" />
+              <FormSelectOption value="experimental" label="experimental" />
+              <FormSelectOption value="staging" label="staging" />
+              <FormSelectOption value="production" label="production" />
+              <FormSelectOption value="deprecated" label="deprecated" />
+            </FormSelect>
+          </FormGroup>
+
+          <FormGroup label="Domain" fieldId="data-domain">
+            <TextInput
+              id="data-domain"
+              value={domain}
+              onChange={(_event, val) => setDomain(val)}
+              placeholder="e.g. insurance, finance, healthcare"
+            />
+          </FormGroup>
+
+          <FormGroup label="PII" fieldId="data-pii">
+            <FormSelect
+              id="data-pii"
+              value={pii}
+              onChange={(_event, val) => setPii(val)}
+            >
+              <FormSelectOption value="" label="Select PII status" />
+              <FormSelectOption value="none" label="none" />
+              <FormSelectOption value="contains-pii" label="contains-pii" />
+              <FormSelectOption value="contains-sensitive" label="contains-sensitive" />
+              <FormSelectOption value="anonymized" label="anonymized" />
+            </FormSelect>
+          </FormGroup>
+
+          <FormGroup label="Custom properties" fieldId="data-custom-properties">
             {customProps.length > 0 && (
               <div style={{ marginBottom: '8px' }}>
                 <Flex style={{ marginBottom: '4px' }}>
@@ -434,6 +502,7 @@ const RegisterDataModal: React.FC<RegisterDataModalProps> = ({
               Add property
             </Button>
           </FormGroup>
+          </FormSection>
         </Form>
       </ModalBody>
       <ModalFooter>

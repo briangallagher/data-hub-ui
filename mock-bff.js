@@ -268,6 +268,17 @@ const server = http.createServer((req, res) => {
       return res.end(JSON.stringify({ ok: true }));
     }
 
+    // GET /namespaces/{ns}/volumes/{name} (volume detail)
+    const volumeDetailMatch = rest.match(/^namespaces\/([^/]+)\/volumes\/([^/]+)$/);
+    if (volumeDetailMatch && req.method === 'GET') {
+      const ns = volumeDetailMatch[1];
+      const name = volumeDetailMatch[2];
+      const vol = (VOLUMES[ns] || []).find(v => v.name === name);
+      if (vol) return res.end(JSON.stringify(vol));
+      res.writeHead(404);
+      return res.end(JSON.stringify({ error: 'not found' }));
+    }
+
     // GET /namespaces/{ns}/volumes
     const volumesMatch = rest.match(/^namespaces\/([^/]+)\/volumes$/);
     if (volumesMatch) {

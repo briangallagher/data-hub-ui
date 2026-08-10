@@ -3,3 +3,14 @@ body,
 #root {
   height: 100%;
 }
+
+@keyframes connection-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.pf-v6-c-modal-box__title-text {
+  white-space: normal !important;
+  overflow: visible !important;
+  text-overflow: unset !important;
+}

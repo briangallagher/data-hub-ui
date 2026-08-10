@@ -100,6 +100,8 @@ export interface DataConnection {
   bucket: string;
   region: string;
   namespace?: string;
+  status?: 'Unverified' | 'Verifying' | 'Verified' | 'Verification failed';
+  lastTested?: string;
 }
 
 // --- Fetch Helpers ---

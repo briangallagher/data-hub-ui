@@ -17,6 +17,8 @@ import {
   Content,
   Popover,
   Title,
+  HelperText,
+  HelperTextItem,
 } from '@patternfly/react-core';
 import { PlusCircleIcon, MinusCircleIcon, OutlinedQuestionCircleIcon } from '@patternfly/react-icons';
 import { useUpdateTable } from './useCatalogApi';
@@ -202,21 +204,12 @@ const EditTableModal: React.FC<EditTableModalProps> = ({
           </FormGroup>
 
           <FormGroup
-            label="Custom properties"
+            label="Labels"
             fieldId="edit-table-properties"
-            labelHelp={
-              <Popover
-                bodyContent="Properties are optional key/value pairs for organizing data assets. They help you filter and find assets but don't affect access or permissions."
-              >
-                <Button variant="plain" aria-label="More info about properties" style={{ padding: 0 }}>
-                  <OutlinedQuestionCircleIcon color="var(--pf-t--global--text--color--subtle)" />
-                </Button>
-              </Popover>
-            }
           >
-            <Content component="p" style={{ color: '#6a6e73', marginBottom: '12px' }}>
-              Optionally, add key/value pair properties to help organize and filter data assets.
-            </Content>
+            <HelperText style={{ marginBottom: 'var(--pf-t--global--spacer--sm)' }}>
+              <HelperTextItem>Optionally, add key/value pair labels to help organize and filter data.</HelperTextItem>
+            </HelperText>
             {customProps.length > 0 && (
               <div style={{ marginBottom: '8px' }}>
                 <Flex style={{ marginBottom: '4px' }}>

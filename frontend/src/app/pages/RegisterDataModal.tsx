@@ -19,6 +19,13 @@ import {
   Checkbox,
   Radio,
   Popover,
+  HelperText,
+  HelperTextItem,
+  Select,
+  SelectOption,
+  SelectList,
+  MenuToggle,
+  Divider,
 } from '@patternfly/react-core';
 import { PlusCircleIcon, MinusCircleIcon, OutlinedQuestionCircleIcon } from '@patternfly/react-icons';
 import { useCreateTable, useCreateVolume, DataConnection } from './useCatalogApi';
@@ -27,6 +34,7 @@ interface RegisterDataModalProps {
   project: string;
   namespace: string;
   connections: DataConnection[];
+  collectionNames: string[];
   onClose: () => void;
 }
 
@@ -51,6 +59,7 @@ const RegisterDataModal: React.FC<RegisterDataModalProps> = ({
   project,
   namespace,
   connections,
+  collectionNames,
   onClose,
 }) => {
   const [assetType, setAssetType] = React.useState<'table' | 'volume'>('table');
@@ -60,6 +69,11 @@ const RegisterDataModal: React.FC<RegisterDataModalProps> = ({
   const [contentType, setContentType] = React.useState('');
   const [connectionRef, setConnectionRef] = React.useState('');
   const [location, setLocation] = React.useState('');
+  const [path, setPath] = React.useState('');
+  const [selectedCollection, setSelectedCollection] = React.useState('default');
+  const [isCollectionOpen, setIsCollectionOpen] = React.useState(false);
+  const [showNewCollection, setShowNewCollection] = React.useState(false);
+  const [newCollectionName, setNewCollectionName] = React.useState('');
   const [accessMode, setAccessMode] = React.useState<'connection' | 'location'>('connection');
   const [columns, setColumns] = React.useState<Array<{ name: string; type: string; description: string; nullable: boolean }>>([]);
   const [error, setError] = React.useState('');
@@ -261,6 +275,56 @@ const RegisterDataModal: React.FC<RegisterDataModalProps> = ({
             </FormGroup>
           )}
 
+          <FormGroup label="Collection" isRequired fieldId="data-collection">
+            <Select
+              id="data-collection"
+              isOpen={isCollectionOpen}
+              selected={selectedCollection}
+              onSelect={(_event, value) => {
+                if (value === '__create_new__') {
+                  setShowNewCollection(true);
+                  setSelectedCollection('__create_new__');
+                } else {
+                  setShowNewCollection(false);
+                  setSelectedCollection(value as string);
+                }
+                setIsCollectionOpen(false);
+              }}
+              onOpenChange={setIsCollectionOpen}
+              toggle={(toggleRef) => (
+                <MenuToggle
+                  ref={toggleRef}
+                  onClick={() => setIsCollectionOpen(!isCollectionOpen)}
+                  isExpanded={isCollectionOpen}
+                  isFullWidth
+                >
+                  {selectedCollection === '__create_new__' ? 'Create new collection' : selectedCollection}
+                </MenuToggle>
+              )}
+            >
+              <SelectList>
+                {(collectionNames.includes('default') ? collectionNames : ['default', ...collectionNames]).map((c) => (
+                  <SelectOption key={c} value={c}>{c}</SelectOption>
+                ))}
+              </SelectList>
+              <Divider />
+              <SelectList>
+                <SelectOption value="__create_new__">Create new collection</SelectOption>
+              </SelectList>
+            </Select>
+            {showNewCollection && (
+              <FormGroup label="New collection name" isRequired fieldId="new-collection-name" style={{ marginTop: 'var(--pf-t--global--spacer--md)' }}>
+              <TextInput
+                id="new-collection-name"
+                value={newCollectionName}
+                onChange={(_event, val) => setNewCollectionName(val)}
+                placeholder="Enter collection name"
+                aria-label="New collection name"
+              />
+              </FormGroup>
+            )}
+          </FormGroup>
+
           <FormGroup label="Data access" fieldId="access-mode" labelHelp={
               <Popover bodyContent="Choose how to reference the data location. Use a Data Connection to leverage a pre-configured connection with credentials, or provide a direct storage location URI.">
                 <Button variant="plain" aria-label="More info about data access" style={{ padding: 0 }}><OutlinedQuestionCircleIcon color="var(--pf-t--global--text--color--subtle)" /></Button>
@@ -333,6 +397,15 @@ const RegisterDataModal: React.FC<RegisterDataModalProps> = ({
               </FormSelect>
             </FormGroup>
           )}
+
+          <FormGroup label="Path" fieldId="data-path">
+            <TextInput
+              id="data-path"
+              value={path}
+              onChange={(_event, val) => setPath(val)}
+              aria-label="Path"
+            />
+          </FormGroup>
 
           {assetType === 'table' && (
             <FormGroup label="Schema (columns)" fieldId="data-columns" labelHelp={
@@ -463,7 +536,10 @@ const RegisterDataModal: React.FC<RegisterDataModalProps> = ({
             </FormSelect>
           </FormGroup>
 
-          <FormGroup label="Custom properties" fieldId="data-custom-properties">
+          <FormGroup label="Labels" fieldId="data-custom-properties">
+            <HelperText style={{ marginBottom: 'var(--pf-t--global--spacer--sm)' }}>
+              <HelperTextItem>Optionally, add key/value pair labels to help organize and filter data.</HelperTextItem>
+            </HelperText>
             {customProps.length > 0 && (
               <div style={{ marginBottom: '8px' }}>
                 <Flex style={{ marginBottom: '4px' }}>

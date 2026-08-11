@@ -100,6 +100,8 @@ export interface DataConnection {
   bucket: string;
   region: string;
   namespace?: string;
+  status?: 'Unverified' | 'Verifying' | 'Verified' | 'Verification failed';
+  lastTested?: string;
 }
 
 // --- Fetch Helpers ---
@@ -214,15 +216,36 @@ export function useCollections(project: string) {
     queryKey: ['catalog', 'collections', project],
     queryFn: async (): Promise<CollectionInfo[]> => {
       const data = await fetchJson<IcebergNamespacesResponse>(namespacesPath(project));
-      return (data.namespaces || []).map((ns) => ({
-        name: ns[0] || 'default',
-        project,
-        description: '',
-        tableCount: 0,
-        volumeCount: 0,
-        createdDate: '',
-        properties: {},
-      }));
+      const collections = await Promise.all(
+        (data.namespaces || []).map(async (ns) => {
+          const name = ns[0] || 'default';
+          let description = '';
+          let tableCount = 0;
+          let volumeCount = 0;
+          let properties: Record<string, string> = {};
+          try {
+            const props = await fetchJson<{ properties: Record<string, string> }>(
+              `${namespacesPath(project)}/${name}/properties`,
+            );
+            description = props.properties?.description || '';
+            properties = props.properties || {};
+          } catch { /* ignore */ }
+          try {
+            const tables = await fetchJson<CatalogAssetsResponse>(
+              genericTablesPath(project, name),
+            );
+            tableCount = (tables.assets || []).length;
+          } catch { /* ignore */ }
+          try {
+            const vols = await fetchJson<{ volumes: unknown[] }>(
+              volumesPath(project, name),
+            );
+            volumeCount = (vols.volumes || []).length;
+          } catch { /* ignore */ }
+          return { name, project, description, tableCount, volumeCount, createdDate: '', properties };
+        }),
+      );
+      return collections;
     },
     enabled: !!project,
   });
@@ -348,6 +371,29 @@ export function useTableDetail(project: string, namespace: string, name: string)
   return useQuery({
     queryKey: ['catalog', 'table-detail', project, namespace, name],
     queryFn: () => fetchJson<CatalogAsset>(`${genericTablesPath(project, namespace)}/${name}`),
+    enabled: !!project && !!namespace && !!name,
+  });
+}
+
+export function useVolumeDetail(project: string, namespace: string, name: string) {
+  return useQuery({
+    queryKey: ['catalog', 'volume-detail', project, namespace, name],
+    queryFn: async (): Promise<CatalogAsset> => {
+      const v = await fetchJson<any>(`${volumesPath(project, namespace)}/${name}`);
+      return {
+        name: v.name,
+        asset_type: 'volume',
+        description: v.comment || v.properties?.description || '',
+        format: '',
+        volume_type: v['volume-type'] || 'EXTERNAL',
+        location: v['storage-location'] || '',
+        connection_ref: v.properties?.['connection-ref'] || '',
+        tags: {},
+        properties: v.properties || {},
+        uuid: '',
+        collection: namespace,
+      };
+    },
     enabled: !!project && !!namespace && !!name,
   });
 }

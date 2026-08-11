@@ -1,7 +1,7 @@
 import React from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useLocation } from 'react-router-dom';
-import DataRegistryPage from '../app/pages/DataRegistryPage';
+import ConnectionsPage from '../app/pages/ConnectionsPage';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -13,13 +13,13 @@ const queryClient = new QueryClient({
   },
 });
 
-const DataHubWrapper: React.FC = () => {
+const ConnectionsWrapper: React.FC = () => {
   const location = useLocation();
   return (
     <QueryClientProvider client={queryClient}>
-      <DataRegistryPage key={location.pathname} />
+      <ConnectionsPage key={location.pathname} />
     </QueryClientProvider>
   );
 };
 
-export default DataHubWrapper;
+export default ConnectionsWrapper;

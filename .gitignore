@@ -359,3 +359,4 @@ frontend/playwright-results/
 frontend/test-results/
 frontend/playwright-auth.json
 
+.claude/

@@ -63,7 +63,6 @@ import {
 import { Link } from 'react-router-dom';
 import { useConnections, useDeleteConnection } from './useCatalogApi';
 import CreateConnectionModal from './CreateConnectionModal';
-import useUser from '~/app/hooks/useUser';
 
 type ConnectionStatus = 'Unverified' | 'Verifying' | 'Verified' | 'Verification failed';
 
@@ -92,7 +91,7 @@ interface ConnectionsTabProps {
 }
 
 const ConnectionsTab: React.FC<ConnectionsTabProps> = ({ project, connectionName }) => {
-  const { userId } = useUser();
+  const userId = 'admin';
   const [filterValue, setFilterValue] = React.useState('');
   const [showCreate, setShowCreate] = React.useState(false);
   const [deleteTarget, setDeleteTarget] = React.useState<string | null>(null);

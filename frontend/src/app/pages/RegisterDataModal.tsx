@@ -78,6 +78,7 @@ const RegisterDataModal: React.FC<RegisterDataModalProps> = ({
   const [columns, setColumns] = React.useState<Array<{ name: string; type: string; description: string; nullable: boolean }>>([]);
   const [error, setError] = React.useState('');
 
+  const [owner, setOwner] = React.useState('');
   const [purpose, setPurpose] = React.useState('');
   const [license, setLicense] = React.useState('');
   const [maturity, setMaturity] = React.useState('');
@@ -162,6 +163,7 @@ const RegisterDataModal: React.FC<RegisterDataModalProps> = ({
           volumeType: '',
           location: effectiveLocation,
           connectionRef: effectiveConnection,
+          owner: owner.trim() || undefined,
           tags: {},
           isVolume: false,
           schemaFields: schemaFields.length > 0 ? schemaFields : undefined,
@@ -244,6 +246,15 @@ const RegisterDataModal: React.FC<RegisterDataModalProps> = ({
               onChange={(_event, val) => setDescription(val)}
               resizeOrientation="vertical"
               rows={3}
+            />
+          </FormGroup>
+
+          <FormGroup label="Owner" fieldId="data-owner">
+            <TextInput
+              id="data-owner"
+              value={owner}
+              onChange={(_event, val) => setOwner(val)}
+              placeholder="e.g. data-team, underwriting-ops"
             />
           </FormGroup>
 

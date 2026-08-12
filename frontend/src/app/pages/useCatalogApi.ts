@@ -34,11 +34,16 @@ interface CatalogAsset {
   volume_type?: string;
   location?: string;
   connection_ref?: string;
+  owner?: string;
   description?: string;
   tags?: Record<string, string>;
   properties?: Record<string, string>;
   uuid?: string;
   collection?: string;
+  registered_by?: string;
+  updated_by?: string;
+  created_at?: string;
+  updated_at?: string;
   columns?: Array<{name: string; type: string; nullable?: boolean; description?: string}>;
 }
 
@@ -88,8 +93,11 @@ export interface TableAsset {
   uuid: string;
   isVolume: boolean;
   columns?: Array<{name: string; type: string; nullable?: boolean; description?: string}>;
+  owner?: string;
   registeredBy?: string;
+  updatedBy?: string;
   createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface DataConnection {
@@ -326,8 +334,11 @@ export async function fetchTablesAndVolumes(project: string, namespace: string):
             uuid: a.uuid || '',
             isVolume: false,
             columns: a.columns || [],
+            owner: (a as any).owner || undefined,
             registeredBy: (a as any).registered_by || undefined,
+            updatedBy: (a as any).updated_by || undefined,
             createdAt: (a as any).created_at || undefined,
+            updatedAt: (a as any).updated_at || undefined,
           });
         }
       } catch { /* no tables */ }
@@ -350,8 +361,11 @@ export async function fetchTablesAndVolumes(project: string, namespace: string):
             properties: v.properties || {},
             uuid: '',
             isVolume: true,
+            owner: v.owner || v.properties?.owner || undefined,
             registeredBy: v.properties?.registered_by,
+            updatedBy: undefined,
             createdAt: v['created-at'] ? String(v['created-at']) : undefined,
+            updatedAt: v['updated-at'] ? String(v['updated-at']) : undefined,
           });
         }
       } catch { /* no volumes */ }
@@ -388,10 +402,15 @@ export function useVolumeDetail(project: string, namespace: string, name: string
         volume_type: v['volume-type'] || 'EXTERNAL',
         location: v['storage-location'] || '',
         connection_ref: v.properties?.['connection-ref'] || '',
+        owner: v.owner || v.properties?.owner || '',
         tags: {},
         properties: v.properties || {},
         uuid: '',
         collection: namespace,
+        registered_by: v.properties?.registered_by || '',
+        updated_by: undefined,
+        created_at: v['created-at'] ? String(v['created-at']) : undefined,
+        updated_at: v['updated-at'] ? String(v['updated-at']) : undefined,
       };
     },
     enabled: !!project && !!namespace && !!name,
@@ -427,6 +446,7 @@ interface CreateTablePayload {
   volumeType: string;
   location: string;
   connectionRef: string;
+  owner?: string;
   tags: Record<string, string>;
   isVolume: boolean;
   schemaFields?: Array<{name: string; type: string; nullable: boolean; description?: string}>;
@@ -449,6 +469,7 @@ export function useCreateTable() {
         format: payload.format || 'iceberg',
         location: payload.location || null,
         connection_ref: payload.connectionRef || null,
+        owner: payload.owner || null,
         description: payload.description || null,
         schema_fields: payload.schemaFields || null,
         properties: payload.properties || null,
@@ -571,14 +592,22 @@ export function useDeleteVolume() {
   });
 }
 
-// --- Update Table (Iceberg REST — set-properties / remove-properties) ---
+// --- Update Table (PATCH generic-tables) ---
 
 export interface UpdateTablePayload {
   project: string;
   namespace: string;
   name: string;
-  setProperties?: Record<string, string>;
-  removeProperties?: string[];
+  description?: string;
+  connection_ref?: string;
+  owner?: string;
+  purpose?: string;
+  license?: string;
+  maturity?: string;
+  domain?: string;
+  pii?: string;
+  schema_fields?: Array<{name: string; type: string; nullable?: boolean; description?: string}>;
+  properties?: Record<string, string>;
 }
 
 export function useUpdateTable() {
@@ -586,20 +615,22 @@ export function useUpdateTable() {
 
   return useMutation({
     mutationFn: async (payload: UpdateTablePayload) => {
-      const updates: Array<{ action: string; updates?: Record<string, string>; removals?: string[] }> = [];
-      if (payload.setProperties && Object.keys(payload.setProperties).length > 0) {
-        updates.push({ action: 'set-properties', updates: payload.setProperties });
-      }
-      if (payload.removeProperties && payload.removeProperties.length > 0) {
-        updates.push({ action: 'remove-properties', removals: payload.removeProperties });
-      }
-      return postJson(
-        `${icebergTablesPath(payload.project, payload.namespace)}/${payload.name}`,
-        { updates },
+      const { project, namespace, name, ...body } = payload;
+      const cleanBody = Object.fromEntries(
+        Object.entries(body).filter(([, v]) => v !== undefined),
       );
+      const resp = await fetch(`${API_BASE}/${project}/namespaces/${namespace}/generic-tables/${name}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify(cleanBody),
+      });
+      if (!resp.ok) throw new Error(`Update failed: ${resp.status}`);
+      return resp.json();
     },
     onSuccess: (_data, variables) => {
       queryClient.invalidateQueries({ queryKey: ['catalog', 'tables-and-volumes', variables.project, variables.namespace] });
+      queryClient.invalidateQueries({ queryKey: ['catalog', 'table-detail', variables.project, variables.namespace, variables.name] });
     },
   });
 }

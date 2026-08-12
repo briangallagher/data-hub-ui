@@ -58,7 +58,6 @@ import {
 import { useSearchParams, useLocation, useNavigate } from 'react-router-dom';
 import { useK8sNamespaces } from './useCatalogApi';
 import ConnectionsTab from './ConnectionsTab';
-import useUser from '~/app/hooks/useUser';
 
 const RhFolderIcon: React.FC<React.SVGProps<SVGSVGElement>> = ({ style, ...props }) => (
   <svg fill="currentColor" viewBox="0 0 36 36" aria-hidden="true" role="img" width="1em" height="1em" style={{ display: 'inline-block', verticalAlign: 'middle', ...style }} {...props}>
@@ -194,7 +193,7 @@ const SOURCE_LABELS: Record<SourceTier, string> = {
 };
 
 const ConnectionCatalog: React.FC = () => {
-  const { userId } = useUser();
+  const userId = 'admin';
   const [catalogFilter, setCatalogFilter] = React.useState('');
   const [activeTier, setActiveTier] = React.useState<'all' | SourceTier>('all');
   const [selectedCategories, setSelectedCategories] = React.useState<string[]>([]);

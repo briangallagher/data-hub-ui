@@ -44,6 +44,8 @@ const EditTableModal: React.FC<EditTableModalProps> = ({
   onClose,
 }) => {
   const [description, setDescription] = React.useState(currentDescription || '');
+  const [connectionRef, setConnectionRef] = React.useState(currentProperties['connection-ref'] || currentProperties['connection_ref'] || '');
+  const [owner, setOwner] = React.useState(currentProperties.owner || '');
 
   const [purpose, setPurpose] = React.useState(currentProperties.purpose || '');
   const [license, setLicense] = React.useState(currentProperties.license || '');
@@ -75,42 +77,25 @@ const EditTableModal: React.FC<EditTableModalProps> = ({
   const handleSubmit = async () => {
     setError('');
 
-    const newProps: Record<string, string> = {};
-    if (description !== currentDescription) {
-      newProps.comment = description;
-      newProps.description = description;
-    }
-
-    if (purpose) newProps.purpose = purpose;
-    if (license) newProps.license = license;
-    if (maturity) newProps.maturity = maturity;
-    if (domain) newProps.domain = domain;
-    if (pii) newProps.pii = pii;
-
+    const customProperties: Record<string, string> = {};
     customProps.forEach((p) => {
-      if (p.key.trim()) newProps[p.key.trim()] = p.value.trim();
+      if (p.key.trim()) customProperties[p.key.trim()] = p.value.trim();
     });
-
-    const allNewKeys = new Set<string>();
-    if (purpose) allNewKeys.add('purpose');
-    if (license) allNewKeys.add('license');
-    if (maturity) allNewKeys.add('maturity');
-    if (domain) allNewKeys.add('domain');
-    if (pii) allNewKeys.add('pii');
-    customProps.forEach((p) => { if (p.key.trim()) allNewKeys.add(p.key.trim()); });
-
-    const oldEditableKeys = Object.keys(currentProperties).filter(
-      (k) => !INTERNAL_KEYS.includes(k) && k !== 'registered_by' && k !== 'created_at',
-    );
-    const removedKeys = oldEditableKeys.filter((k) => !allNewKeys.has(k));
 
     try {
       await updateMutation.mutateAsync({
         project,
         namespace,
         name,
-        setProperties: Object.keys(newProps).length > 0 ? newProps : undefined,
-        removeProperties: removedKeys.length > 0 ? removedKeys : undefined,
+        description: description || undefined,
+        connection_ref: connectionRef || undefined,
+        owner: owner || undefined,
+        purpose: purpose || undefined,
+        license: license || undefined,
+        maturity: maturity || undefined,
+        domain: domain || undefined,
+        pii: pii || undefined,
+        properties: Object.keys(customProperties).length > 0 ? customProperties : undefined,
       });
       onClose();
     } catch (e: any) {
@@ -136,6 +121,24 @@ const EditTableModal: React.FC<EditTableModalProps> = ({
               id="edit-table-description"
               value={description}
               onChange={(_event, val) => setDescription(val)}
+            />
+          </FormGroup>
+
+          <FormGroup label="Owner" fieldId="edit-table-owner">
+            <TextInput
+              id="edit-table-owner"
+              value={owner}
+              onChange={(_event, val) => setOwner(val)}
+              placeholder="e.g. data-team, underwriting-ops"
+            />
+          </FormGroup>
+
+          <FormGroup label="Connection" fieldId="edit-table-connection">
+            <TextInput
+              id="edit-table-connection"
+              value={connectionRef}
+              onChange={(_event, val) => setConnectionRef(val)}
+              placeholder="e.g. minio-underwriting"
             />
           </FormGroup>
 

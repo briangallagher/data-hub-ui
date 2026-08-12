@@ -87,7 +87,6 @@ import {
 import RegisterDataModal from './RegisterDataModal';
 import EditTableModal from './EditTableModal';
 import EditVolumeModal from './EditVolumeModal';
-import useUser from '~/app/hooks/useUser';
 
 const FORMAT_COLORS: Record<string, 'orange' | 'blue' | 'green' | 'grey' | 'teal' | 'purple'> = {
   iceberg: 'orange',
@@ -246,9 +245,17 @@ const DataRegistryPage: React.FC = () => {
     }
     if (nameFilter) {
       const q = nameFilter.toLowerCase();
-      result = result.filter(
-        (a) => a.name.toLowerCase().includes(q) || a.description.toLowerCase().includes(q),
-      );
+      result = result.filter((a) => {
+        if (a.name.toLowerCase().includes(q)) return true;
+        if (a.description.toLowerCase().includes(q)) return true;
+        if (a.owner?.toLowerCase().includes(q)) return true;
+        if (a.connectionRef?.toLowerCase().includes(q)) return true;
+        const propValues = Object.values(a.properties || {}).join(' ').toLowerCase();
+        if (propValues.includes(q)) return true;
+        const tagValues = Object.values(a.tags || {}).join(' ').toLowerCase();
+        if (tagValues.includes(q)) return true;
+        return false;
+      });
     }
     return result;
   }, [allAssets, nameFilter, selectedAssetTypes, selectedFormats]);
@@ -834,7 +841,6 @@ const AssetDetailContent: React.FC<{
   onEdit: () => void;
   onDelete: () => void;
 }> = ({ project, namespace, assetName, isVolume, detailQuery, onEdit, onDelete }) => {
-  const { userId } = useUser();
   const [detailKebabOpen, setDetailKebabOpen] = React.useState(false);
   const [propsExpanded, setPropsExpanded] = React.useState(false);
   const [labelsExpanded, setLabelsExpanded] = React.useState(false);
@@ -985,15 +991,15 @@ const AssetDetailContent: React.FC<{
                             </DescriptionListGroup>
                             <DescriptionListGroup>
                               <DescriptionListTerm>Owner</DescriptionListTerm>
-                              <DescriptionListDescription>{asset.properties?.registered_by || userId}</DescriptionListDescription>
+                              <DescriptionListDescription>{(asset as any).owner || asset.properties?.owner || asset.properties?.registered_by || '—'}</DescriptionListDescription>
                             </DescriptionListGroup>
                             <DescriptionListGroup>
                               <DescriptionListTerm>Created</DescriptionListTerm>
-                              <DescriptionListDescription>6/15/2026, 10:32:00 AM by {userId}</DescriptionListDescription>
+                              <DescriptionListDescription>{(asset as any).created_at ? `${new Date((asset as any).created_at).toLocaleString()} by ${(asset as any).registered_by || '—'}` : '—'}</DescriptionListDescription>
                             </DescriptionListGroup>
                             <DescriptionListGroup>
                               <DescriptionListTerm>Last modified</DescriptionListTerm>
-                              <DescriptionListDescription>6/15/2026, 10:32:00 AM by {userId}</DescriptionListDescription>
+                              <DescriptionListDescription>{(asset as any).updated_at ? `${new Date((asset as any).updated_at).toLocaleString()} by ${(asset as any).updated_by || '—'}` : '—'}</DescriptionListDescription>
                             </DescriptionListGroup>
                           </DescriptionList>
                         </GridItem>
@@ -1275,18 +1281,6 @@ const CollectionDetailContent: React.FC<{
                   <DescriptionListGroup>
                     <DescriptionListTerm>Volumes</DescriptionListTerm>
                     <DescriptionListDescription>{collection?.volumeCount ?? '—'}</DescriptionListDescription>
-                  </DescriptionListGroup>
-                  <DescriptionListGroup>
-                    <DescriptionListTerm>Owner</DescriptionListTerm>
-                    <DescriptionListDescription>{collection?.properties?.created_by || 'system:admin'}</DescriptionListDescription>
-                  </DescriptionListGroup>
-                  <DescriptionListGroup>
-                    <DescriptionListTerm>Created</DescriptionListTerm>
-                    <DescriptionListDescription>{collection?.createdDate || '6/10/2026, 9:15:00 AM'}</DescriptionListDescription>
-                  </DescriptionListGroup>
-                  <DescriptionListGroup>
-                    <DescriptionListTerm>Last modified</DescriptionListTerm>
-                    <DescriptionListDescription>{'7/22/2026, 1:45:30 PM'}</DescriptionListDescription>
                   </DescriptionListGroup>
                 </DescriptionList>
 

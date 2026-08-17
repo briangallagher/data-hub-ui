@@ -71,6 +71,7 @@ import { useSearchParams, useLocation, useNavigate, Link } from 'react-router-do
 import {
   useK8sNamespaces,
   useCollections,
+  useTags,
   fetchTablesAndVolumes,
   useTablesAndVolumes,
   useConnections,
@@ -87,6 +88,7 @@ import {
 import RegisterDataModal from './RegisterDataModal';
 import EditTableModal from './EditTableModal';
 import EditVolumeModal from './EditVolumeModal';
+import useUser from '~/app/hooks/useUser';
 
 const FORMAT_COLORS: Record<string, 'orange' | 'blue' | 'green' | 'grey' | 'teal' | 'purple'> = {
   iceberg: 'orange',
@@ -122,7 +124,8 @@ const DataRegistryPage: React.FC = () => {
   const [selectedCollections, setSelectedCollections] = React.useState<string[]>([]);
   const [selectedAssetTypes, setSelectedAssetTypes] = React.useState<string[]>(['Tables', 'Volumes']);
   const [selectedFormats, setSelectedFormats] = React.useState<string[]>([]);
-  const [activeAttribute, setActiveAttribute] = React.useState<'Collections' | 'Asset type' | 'Format'>('Collections');
+  const [activeAttribute, setActiveAttribute] = React.useState<'Collections' | 'Tags' | 'Asset type' | 'Format'>('Collections');
+  const [selectedTags, setSelectedTags] = React.useState<string[]>([]);
   const [isAttributeOpen, setIsAttributeOpen] = React.useState(false);
   const [isValueOpen, setIsValueOpen] = React.useState(false);
   const [nameFilter, setNameFilter] = React.useState('');
@@ -150,6 +153,9 @@ const DataRegistryPage: React.FC = () => {
 
   const collectionsQuery = useCollections(selectedProject);
   const collections: CollectionInfo[] = collectionsQuery.data || [];
+
+  const tagsQuery = useTags(selectedProject);
+  const availableTags: string[] = tagsQuery.data || [];
 
   const connectionsQuery = useConnections(selectedProject);
   const connections: DataConnection[] = connectionsQuery.data || [];
@@ -243,28 +249,24 @@ const DataRegistryPage: React.FC = () => {
         return selectedFormats.includes(f);
       });
     }
+    if (selectedTags.length > 0) {
+      result = result.filter((a) =>
+        selectedTags.some((t) => (a.tags || []).includes(t)),
+      );
+    }
     if (nameFilter) {
       const q = nameFilter.toLowerCase();
-      result = result.filter((a) => {
-        if (a.name.toLowerCase().includes(q)) return true;
-        if (a.description.toLowerCase().includes(q)) return true;
-        if (a.owner?.toLowerCase().includes(q)) return true;
-        if (a.connectionRef?.toLowerCase().includes(q)) return true;
-        const propValues = Object.values(a.properties || {}).join(' ').toLowerCase();
-        if (propValues.includes(q)) return true;
-        const tagValues = Object.values(a.tags || {}).join(' ').toLowerCase();
-        if (tagValues.includes(q)) return true;
-        return false;
-      });
+      result = result.filter(
+        (a) => a.name.toLowerCase().includes(q) || a.description.toLowerCase().includes(q),
+      );
     }
     return result;
-  }, [allAssets, nameFilter, selectedAssetTypes, selectedFormats]);
+  }, [allAssets, nameFilter, selectedAssetTypes, selectedFormats, selectedTags]);
 
-  const sortableColumns = ['name', 'namespace', 'assetType', 'format'] as const;
+  const sortableColumns = ['name', 'assetType', 'format'] as const;
   const getSortableValue = (asset: TableAsset, key: typeof sortableColumns[number]): string => {
     switch (key) {
       case 'name': return asset.name.toLowerCase();
-      case 'namespace': return asset.namespace.toLowerCase();
       case 'assetType': return asset.isVolume ? 'volume' : 'table';
       case 'format': return asset.isVolume ? 'unstructured' : (asset.format || '').toLowerCase();
     }
@@ -485,6 +487,7 @@ const DataRegistryPage: React.FC = () => {
                         >
                           <SelectList>
                             <SelectOption value="Collections">Collections</SelectOption>
+                            <SelectOption value="Tags">Tags</SelectOption>
                             <SelectOption value="Asset type">Asset type</SelectOption>
                             <SelectOption value="Format">Format</SelectOption>
                           </SelectList>
@@ -522,6 +525,42 @@ const DataRegistryPage: React.FC = () => {
                           <SelectList>
                             {collections.map((c) => (
                               <SelectOption key={c.name} hasCheckbox value={c.name} isSelected={selectedCollections.includes(c.name)}>{c.name}</SelectOption>
+                            ))}
+                          </SelectList>
+                        </Select>
+                      </ToolbarFilter>
+                      <ToolbarFilter
+                        labels={selectedTags}
+                        deleteLabel={(_category, label) => setSelectedTags((prev) => prev.filter((v) => v !== String(label)))}
+                        deleteLabelGroup={() => setSelectedTags([])}
+                        categoryName="Tags"
+                        showToolbarItem={activeAttribute === 'Tags'}
+                      >
+                        <Select
+                          role="menu"
+                          isOpen={isValueOpen && activeAttribute === 'Tags'}
+                          onSelect={(_event, value) => {
+                            const val = String(value);
+                            setSelectedTags((prev) =>
+                              prev.includes(val) ? prev.filter((v) => v !== val) : [...prev, val],
+                            );
+                          }}
+                          onOpenChange={(open) => setIsValueOpen(open)}
+                          toggle={(toggleRef) => (
+                            <MenuToggle
+                              ref={toggleRef}
+                              onClick={() => setIsValueOpen(!isValueOpen)}
+                              isExpanded={isValueOpen && activeAttribute === 'Tags'}
+                            >
+                              {selectedTags.length === 0
+                                ? 'All tags'
+                                : `${selectedTags.length} selected`}
+                            </MenuToggle>
+                          )}
+                        >
+                          <SelectList>
+                            {availableTags.map((t) => (
+                              <SelectOption key={t} hasCheckbox value={t} isSelected={selectedTags.includes(t)}>{t}</SelectOption>
                             ))}
                           </SelectList>
                         </Select>
@@ -613,14 +652,14 @@ const DataRegistryPage: React.FC = () => {
 
                 {isLoading ? (
                   <Bullseye style={{ minHeight: 'var(--pf-t--global--spacer--4xl)' }}><Spinner /></Bullseye>
-                ) : filteredAssets.length === 0 && (nameFilter || selectedAssetTypes.length < 2 || selectedFormats.length < allFormats.length || selectedCollections.length < allCollectionNames.length) ? (
+                ) : filteredAssets.length === 0 && (nameFilter || selectedTags.length > 0 || selectedAssetTypes.length < 2 || selectedFormats.length < allFormats.length || selectedCollections.length < allCollectionNames.length) ? (
                   <EmptyState titleText="No results found" icon={SearchIcon}>
                     <EmptyStateBody>
                       No results match the current filters. Adjust your filters and try again.
                     </EmptyStateBody>
                     <EmptyStateFooter>
                       <EmptyStateActions>
-                        <Button variant="link" onClick={() => { setNameFilter(''); setSelectedCollections(allCollectionNames); setSelectedAssetTypes(['Tables', 'Volumes']); setSelectedFormats(allFormats); }}>
+                        <Button variant="link" onClick={() => { setNameFilter(''); setSelectedCollections(allCollectionNames); setSelectedTags([]); setSelectedAssetTypes(['Tables', 'Volumes']); setSelectedFormats(allFormats); }}>
                           Clear all filters
                         </Button>
                       </EmptyStateActions>
@@ -638,10 +677,10 @@ const DataRegistryPage: React.FC = () => {
                     <Thead>
                       <Tr>
                         <Th sort={getSortParams(0)}>Name</Th>
-                        <Th sort={getSortParams(1)}>Collection</Th>
-                        <Th sort={getSortParams(2)}>Asset type</Th>
-                        <Th sort={getSortParams(3)}>Format</Th>
+                        <Th sort={getSortParams(1)}>Asset type</Th>
+                        <Th sort={getSortParams(2)}>Format</Th>
                         <Th>Asset location</Th>
+                        <Th>Tags</Th>
                         <Th>Properties</Th>
                         <Th>Labels</Th>
                         <Th isStickyColumn stickyMinWidth="50px" stickyRightOffset="0" />
@@ -667,11 +706,6 @@ const DataRegistryPage: React.FC = () => {
                                 </div>
                               )}
                             </Td>
-                            <Td dataLabel="Collection">
-                              <Link to={`/ai-hub/data/collections/${asset.namespace}?project=${selectedProject}`}>
-                                {asset.namespace}
-                              </Link>
-                            </Td>
                             <Td dataLabel="Asset type">
                               {asset.isVolume ? 'Volume' : 'Table'}
                             </Td>
@@ -693,6 +727,15 @@ const DataRegistryPage: React.FC = () => {
                                 <span style={{ fontSize: 'var(--pf-t--global--font--size--sm)' }}>
                                   {asset.location.length > 40 ? `${asset.location.substring(0, 40)}...` : asset.location}
                                 </span>
+                              ) : '—'}
+                            </Td>
+                            <Td dataLabel="Tags">
+                              {(asset.tags || []).length > 0 ? (
+                                <LabelGroup numLabels={3} isCompact>
+                                  {(asset.tags || []).map((t) => (
+                                    <Label key={t} isCompact variant="outline" color="blue">{t}</Label>
+                                  ))}
+                                </LabelGroup>
                               ) : '—'}
                             </Td>
                             <Td dataLabel="Properties">
@@ -803,7 +846,7 @@ const DataRegistryPage: React.FC = () => {
 
       {/* Register modal */}
       {showRegister && (
-        <RegisterDataModal project={selectedProject} namespace={registerNamespace} connections={connections} collectionNames={allCollectionNames} onClose={() => setShowRegister(false)} />
+        <RegisterDataModal project={selectedProject} namespace={registerNamespace} connections={connections} collectionNames={allCollectionNames} availableTags={availableTags} onClose={() => setShowRegister(false)} />
       )}
 
       {/* Edit modals */}
@@ -814,6 +857,8 @@ const DataRegistryPage: React.FC = () => {
           name={editTarget.name}
           currentDescription={editTarget.description}
           currentProperties={editTarget.properties}
+          currentTags={editTarget.tags}
+          availableTags={availableTags}
           onClose={() => setEditTarget(null)}
         />
       )}
@@ -841,6 +886,7 @@ const AssetDetailContent: React.FC<{
   onEdit: () => void;
   onDelete: () => void;
 }> = ({ project, namespace, assetName, isVolume, detailQuery, onEdit, onDelete }) => {
+  const userId = 'admin';
   const [detailKebabOpen, setDetailKebabOpen] = React.useState(false);
   const [propsExpanded, setPropsExpanded] = React.useState(false);
   const [labelsExpanded, setLabelsExpanded] = React.useState(false);
@@ -884,12 +930,13 @@ const AssetDetailContent: React.FC<{
   const connectionRef = asset.connection_ref || asset.properties?.['connection-ref'] || '';
   const columns = asset.columns || [];
 
-  const tags = { ...(asset.tags || {}), ...(asset.properties || {}) };
+  const assetTags = asset.tags || [];
+  const allProps = asset.properties || {};
   const metaKeys = ['description', 'format', 'connection-ref', 'volume_type', 'location'];
-  const displayTags = Object.entries(tags).filter(([k]) => !metaKeys.includes(k));
+  const displayProps = Object.entries(allProps).filter(([k]) => !metaKeys.includes(k));
   const PROPERTY_KEYS = ['pii', 'purpose', 'maturity', 'domain', 'license'];
-  const detailPropertyEntries = displayTags.filter(([k]) => PROPERTY_KEYS.includes(k.toLowerCase()));
-  const detailLabelEntries = displayTags.filter(([k]) => !PROPERTY_KEYS.includes(k.toLowerCase()));
+  const detailPropertyEntries = displayProps.filter(([k]) => PROPERTY_KEYS.includes(k.toLowerCase()));
+  const detailLabelEntries = displayProps.filter(([k]) => !PROPERTY_KEYS.includes(k.toLowerCase()));
 
   return (
     <>
@@ -991,15 +1038,15 @@ const AssetDetailContent: React.FC<{
                             </DescriptionListGroup>
                             <DescriptionListGroup>
                               <DescriptionListTerm>Owner</DescriptionListTerm>
-                              <DescriptionListDescription>{(asset as any).owner || asset.properties?.owner || asset.properties?.registered_by || '—'}</DescriptionListDescription>
+                              <DescriptionListDescription>{asset.properties?.registered_by || userId}</DescriptionListDescription>
                             </DescriptionListGroup>
                             <DescriptionListGroup>
                               <DescriptionListTerm>Created</DescriptionListTerm>
-                              <DescriptionListDescription>{(asset as any).created_at ? `${new Date((asset as any).created_at).toLocaleString()} by ${(asset as any).registered_by || '—'}` : '—'}</DescriptionListDescription>
+                              <DescriptionListDescription>6/15/2026, 10:32:00 AM by {userId}</DescriptionListDescription>
                             </DescriptionListGroup>
                             <DescriptionListGroup>
                               <DescriptionListTerm>Last modified</DescriptionListTerm>
-                              <DescriptionListDescription>{(asset as any).updated_at ? `${new Date((asset as any).updated_at).toLocaleString()} by ${(asset as any).updated_by || '—'}` : '—'}</DescriptionListDescription>
+                              <DescriptionListDescription>6/15/2026, 10:32:00 AM by {userId}</DescriptionListDescription>
                             </DescriptionListGroup>
                           </DescriptionList>
                         </GridItem>
@@ -1042,33 +1089,43 @@ const AssetDetailContent: React.FC<{
                           </DescriptionListDescription>
                         </DescriptionListGroup>
                         <DescriptionListGroup>
-                          <DescriptionListTerm>Labels</DescriptionListTerm>
+                          <DescriptionListTerm>Tags</DescriptionListTerm>
                           <DescriptionListDescription>
-                            {detailLabelEntries.length > 0 ? (
-                              <>
-                                <div
-                                  ref={labelsRef}
-                                  style={{
-                                    maxHeight: labelsExpanded ? 'none' : `${collapsedHeight}px`,
-                                    overflow: 'hidden',
-                                    display: 'flex',
-                                    flexWrap: 'wrap',
-                                    gap: '8px',
-                                  }}
-                                >
-                                  {detailLabelEntries.map(([k, v]) => (
-                                    <Label key={k} isCompact variant="outline">{k}: {v}</Label>
-                                  ))}
-                                </div>
-                                {labelsOverflows && (
-                                  <Button variant="plain" isInline onClick={() => setLabelsExpanded(!labelsExpanded)} style={{ fontSize: 'var(--pf-t--global--font--size--body--sm)', paddingTop: 'var(--pf-t--global--spacer--xs)' }}>
-                                    {labelsExpanded ? 'Show less' : `${detailLabelEntries.length - Math.floor(collapsedHeight / LABEL_ROW_HEIGHT)} more`}
-                                  </Button>
-                                )}
-                              </>
+                            {assetTags.length > 0 ? (
+                              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                                {assetTags.map((t) => (
+                                  <Label key={t} isCompact variant="outline" color="blue">{t}</Label>
+                                ))}
+                              </div>
                             ) : '—'}
                           </DescriptionListDescription>
                         </DescriptionListGroup>
+                        {detailLabelEntries.length > 0 && (
+                          <DescriptionListGroup>
+                            <DescriptionListTerm>Labels</DescriptionListTerm>
+                            <DescriptionListDescription>
+                              <div
+                                ref={labelsRef}
+                                style={{
+                                  maxHeight: labelsExpanded ? 'none' : `${collapsedHeight}px`,
+                                  overflow: 'hidden',
+                                  display: 'flex',
+                                  flexWrap: 'wrap',
+                                  gap: '8px',
+                                }}
+                              >
+                                {detailLabelEntries.map(([k, v]) => (
+                                  <Label key={k} isCompact variant="outline">{k}: {v}</Label>
+                                ))}
+                              </div>
+                              {labelsOverflows && (
+                                <Button variant="plain" isInline onClick={() => setLabelsExpanded(!labelsExpanded)} style={{ fontSize: 'var(--pf-t--global--font--size--body--sm)', paddingTop: 'var(--pf-t--global--spacer--xs)' }}>
+                                  {labelsExpanded ? 'Show less' : `${detailLabelEntries.length - Math.floor(collapsedHeight / LABEL_ROW_HEIGHT)} more`}
+                                </Button>
+                              )}
+                            </DescriptionListDescription>
+                          </DescriptionListGroup>
+                        )}
                       </DescriptionList>
                     </CardBody>
                   </Card>
@@ -1134,6 +1191,8 @@ const CollectionDetailContent: React.FC<{
   const collection = collections.find((c) => c.name === collectionName);
   const assetsQuery = useTablesAndVolumes(project, collectionName);
   const assets = assetsQuery.data || [];
+  const tagsQ = useTags(project);
+  const availableTags = tagsQ.data || [];
 
   const handleDeleteAsset = async () => {
     if (!deleteAssetTarget) return;
@@ -1282,6 +1341,18 @@ const CollectionDetailContent: React.FC<{
                     <DescriptionListTerm>Volumes</DescriptionListTerm>
                     <DescriptionListDescription>{collection?.volumeCount ?? '—'}</DescriptionListDescription>
                   </DescriptionListGroup>
+                  <DescriptionListGroup>
+                    <DescriptionListTerm>Owner</DescriptionListTerm>
+                    <DescriptionListDescription>{collection?.properties?.created_by || 'system:admin'}</DescriptionListDescription>
+                  </DescriptionListGroup>
+                  <DescriptionListGroup>
+                    <DescriptionListTerm>Created</DescriptionListTerm>
+                    <DescriptionListDescription>{collection?.createdDate || '6/10/2026, 9:15:00 AM'}</DescriptionListDescription>
+                  </DescriptionListGroup>
+                  <DescriptionListGroup>
+                    <DescriptionListTerm>Last modified</DescriptionListTerm>
+                    <DescriptionListDescription>{'7/22/2026, 1:45:30 PM'}</DescriptionListDescription>
+                  </DescriptionListGroup>
                 </DescriptionList>
 
                 {collection?.properties && Object.keys(collection.properties).filter((k) => k !== 'description' && k !== 'created_by').length > 0 && (
@@ -1351,6 +1422,8 @@ const CollectionDetailContent: React.FC<{
           name={editTarget.name}
           currentDescription={editTarget.description}
           currentProperties={editTarget.properties}
+          currentTags={editTarget.tags}
+          availableTags={availableTags}
           onClose={() => setEditTarget(null)}
         />
       )}

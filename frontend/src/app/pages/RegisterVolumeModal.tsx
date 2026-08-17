@@ -100,7 +100,7 @@ const RegisterVolumeModal: React.FC<RegisterVolumeModalProps> = ({
         volumeType: 'EXTERNAL',
         location: accessMode === 'location' ? location : '',
         connectionRef: accessMode === 'connection' ? connectionRef : '',
-        tags: {},
+        tags: [],
         isVolume: true,
         properties: Object.keys(properties).length > 0 ? properties : undefined,
       });

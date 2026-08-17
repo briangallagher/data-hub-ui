@@ -19,9 +19,16 @@ import {
   Title,
   HelperText,
   HelperTextItem,
+  Select,
+  SelectOption,
+  SelectList,
+  MenuToggle,
+  Divider,
+  Label,
+  LabelGroup,
 } from '@patternfly/react-core';
 import { PlusCircleIcon, MinusCircleIcon, OutlinedQuestionCircleIcon } from '@patternfly/react-icons';
-import { useUpdateTable } from './useCatalogApi';
+import { usePatchGenericTable } from './useCatalogApi';
 
 interface EditTableModalProps {
   project: string;
@@ -29,6 +36,8 @@ interface EditTableModalProps {
   name: string;
   currentDescription: string;
   currentProperties: Record<string, string>;
+  currentTags?: string[];
+  availableTags?: string[];
   onClose: () => void;
 }
 
@@ -41,11 +50,14 @@ const EditTableModal: React.FC<EditTableModalProps> = ({
   name,
   currentDescription,
   currentProperties,
+  currentTags = [],
+  availableTags = [],
   onClose,
 }) => {
   const [description, setDescription] = React.useState(currentDescription || '');
-  const [connectionRef, setConnectionRef] = React.useState(currentProperties['connection-ref'] || currentProperties['connection_ref'] || '');
-  const [owner, setOwner] = React.useState(currentProperties.owner || '');
+  const [selectedTags, setSelectedTags] = React.useState<string[]>(currentTags);
+  const [newTagValue, setNewTagValue] = React.useState('');
+  const [isTagOpen, setIsTagOpen] = React.useState(false);
 
   const [purpose, setPurpose] = React.useState(currentProperties.purpose || '');
   const [license, setLicense] = React.useState(currentProperties.license || '');
@@ -60,7 +72,7 @@ const EditTableModal: React.FC<EditTableModalProps> = ({
   );
   const [error, setError] = React.useState('');
 
-  const updateMutation = useUpdateTable();
+  const updateMutation = usePatchGenericTable();
 
   const handleAddProperty = () => {
     setCustomProps([...customProps, { key: '', value: '' }]);
@@ -77,9 +89,14 @@ const EditTableModal: React.FC<EditTableModalProps> = ({
   const handleSubmit = async () => {
     setError('');
 
-    const customProperties: Record<string, string> = {};
+    const properties: Record<string, string> = {};
+    if (purpose) properties.purpose = purpose;
+    if (license) properties.license = license;
+    if (maturity) properties.maturity = maturity;
+    if (domain) properties.domain = domain;
+    if (pii) properties.pii = pii;
     customProps.forEach((p) => {
-      if (p.key.trim()) customProperties[p.key.trim()] = p.value.trim();
+      if (p.key.trim()) properties[p.key.trim()] = p.value.trim();
     });
 
     try {
@@ -87,15 +104,9 @@ const EditTableModal: React.FC<EditTableModalProps> = ({
         project,
         namespace,
         name,
-        description: description || undefined,
-        connection_ref: connectionRef || undefined,
-        owner: owner || undefined,
-        purpose: purpose || undefined,
-        license: license || undefined,
-        maturity: maturity || undefined,
-        domain: domain || undefined,
-        pii: pii || undefined,
-        properties: Object.keys(customProperties).length > 0 ? customProperties : undefined,
+        description: description !== currentDescription ? description : undefined,
+        tags: selectedTags.filter((t) => t !== '__new_tag__'),
+        properties: Object.keys(properties).length > 0 ? properties : undefined,
       });
       onClose();
     } catch (e: any) {
@@ -124,22 +135,99 @@ const EditTableModal: React.FC<EditTableModalProps> = ({
             />
           </FormGroup>
 
-          <FormGroup label="Owner" fieldId="edit-table-owner">
-            <TextInput
-              id="edit-table-owner"
-              value={owner}
-              onChange={(_event, val) => setOwner(val)}
-              placeholder="e.g. data-team, underwriting-ops"
-            />
-          </FormGroup>
-
-          <FormGroup label="Connection" fieldId="edit-table-connection">
-            <TextInput
-              id="edit-table-connection"
-              value={connectionRef}
-              onChange={(_event, val) => setConnectionRef(val)}
-              placeholder="e.g. minio-underwriting"
-            />
+          <FormGroup label="Tags" fieldId="edit-table-tags">
+            <Select
+              id="edit-table-tags"
+              role="menu"
+              isOpen={isTagOpen}
+              onSelect={(_event, value) => {
+                const val = String(value);
+                if (val === '__new_tag__') {
+                  setSelectedTags((prev) =>
+                    prev.includes(val) ? prev : [...prev, val],
+                  );
+                } else {
+                  setSelectedTags((prev) =>
+                    prev.includes(val) ? prev.filter((v) => v !== val) : [...prev, val],
+                  );
+                }
+              }}
+              onOpenChange={setIsTagOpen}
+              toggle={(toggleRef) => (
+                <MenuToggle
+                  ref={toggleRef}
+                  onClick={() => setIsTagOpen(!isTagOpen)}
+                  isExpanded={isTagOpen}
+                  isFullWidth
+                >
+                  {selectedTags.filter((t) => t !== '__new_tag__').length === 0 ? 'Select tags' : `${selectedTags.filter((t) => t !== '__new_tag__').length} tag${selectedTags.filter((t) => t !== '__new_tag__').length > 1 ? 's' : ''} selected`}
+                </MenuToggle>
+              )}
+            >
+              <SelectList>
+                {[...new Set([...availableTags, ...currentTags])].map((t) => (
+                  <SelectOption key={t} hasCheckbox value={t} isSelected={selectedTags.includes(t)}>{t}</SelectOption>
+                ))}
+              </SelectList>
+              <Divider />
+              <SelectList>
+                <SelectOption value="__new_tag__">
+                  <Flex alignItems={{ default: 'alignItemsCenter' }} spaceItems={{ default: 'spaceItemsSm' }}>
+                    <FlexItem><PlusCircleIcon /></FlexItem>
+                    <FlexItem>Create new tag</FlexItem>
+                  </Flex>
+                </SelectOption>
+              </SelectList>
+            </Select>
+            {selectedTags.includes('__new_tag__') && (
+              <Flex alignItems={{ default: 'alignItemsCenter' }} spaceItems={{ default: 'spaceItemsSm' }} style={{ marginTop: 'var(--pf-t--global--spacer--sm)' }}>
+                <FlexItem grow={{ default: 'grow' }}>
+                  <TextInput
+                    id="edit-new-tag-input"
+                    value={newTagValue}
+                    onChange={(_event, val) => setNewTagValue(val)}
+                    placeholder="Enter new tag name"
+                    aria-label="New tag name"
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && newTagValue.trim()) {
+                        e.preventDefault();
+                        setSelectedTags((prev) => [...prev.filter((t) => t !== '__new_tag__'), newTagValue.trim()]);
+                        setNewTagValue('');
+                      }
+                    }}
+                  />
+                </FlexItem>
+                <FlexItem>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    isDisabled={!newTagValue.trim()}
+                    onClick={() => {
+                      if (newTagValue.trim()) {
+                        setSelectedTags((prev) => [...prev.filter((t) => t !== '__new_tag__'), newTagValue.trim()]);
+                        setNewTagValue('');
+                      }
+                    }}
+                  >
+                    Add
+                  </Button>
+                </FlexItem>
+              </Flex>
+            )}
+            {selectedTags.filter((t) => t !== '__new_tag__').length > 0 && (
+              <LabelGroup style={{ marginTop: 'var(--pf-t--global--spacer--sm)' }}>
+                {selectedTags.filter((t) => t !== '__new_tag__').map((t) => (
+                  <Label
+                    key={t}
+                    isCompact
+                    color="blue"
+                    onClose={() => setSelectedTags((prev) => prev.filter((v) => v !== t))}
+                  >
+                    {t}
+                  </Label>
+                ))}
+              </LabelGroup>
+            )}
           </FormGroup>
 
           <Title headingLevel="h3" size="md" style={{ marginTop: '16px', marginBottom: '8px' }}>

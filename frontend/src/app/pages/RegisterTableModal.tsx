@@ -125,7 +125,7 @@ const RegisterTableModal: React.FC<RegisterTableModalProps> = ({
         volumeType: '',
         location: effectiveLocation,
         connectionRef: accessMode === 'connection' ? connectionRef : '',
-        tags: {},
+        tags: [],
         isVolume: false,
         schemaFields: schemaFields.length > 0 ? schemaFields : undefined,
         properties: Object.keys(properties).length > 0 ? properties : undefined,

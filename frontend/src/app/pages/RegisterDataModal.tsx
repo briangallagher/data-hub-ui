@@ -26,6 +26,8 @@ import {
   SelectList,
   MenuToggle,
   Divider,
+  Label,
+  LabelGroup,
 } from '@patternfly/react-core';
 import { PlusCircleIcon, MinusCircleIcon, OutlinedQuestionCircleIcon } from '@patternfly/react-icons';
 import { useCreateTable, useCreateVolume, DataConnection } from './useCatalogApi';
@@ -35,6 +37,7 @@ interface RegisterDataModalProps {
   namespace: string;
   connections: DataConnection[];
   collectionNames: string[];
+  availableTags?: string[];
   onClose: () => void;
 }
 
@@ -60,6 +63,7 @@ const RegisterDataModal: React.FC<RegisterDataModalProps> = ({
   namespace,
   connections,
   collectionNames,
+  availableTags = [],
   onClose,
 }) => {
   const [assetType, setAssetType] = React.useState<'table' | 'volume'>('table');
@@ -74,11 +78,13 @@ const RegisterDataModal: React.FC<RegisterDataModalProps> = ({
   const [isCollectionOpen, setIsCollectionOpen] = React.useState(false);
   const [showNewCollection, setShowNewCollection] = React.useState(false);
   const [newCollectionName, setNewCollectionName] = React.useState('');
+  const [selectedTags, setSelectedTags] = React.useState<string[]>([]);
+  const [newTagValue, setNewTagValue] = React.useState('');
+  const [isTagOpen, setIsTagOpen] = React.useState(false);
   const [accessMode, setAccessMode] = React.useState<'connection' | 'location'>('connection');
   const [columns, setColumns] = React.useState<Array<{ name: string; type: string; description: string; nullable: boolean }>>([]);
   const [error, setError] = React.useState('');
 
-  const [owner, setOwner] = React.useState('');
   const [purpose, setPurpose] = React.useState('');
   const [license, setLicense] = React.useState('');
   const [maturity, setMaturity] = React.useState('');
@@ -163,8 +169,7 @@ const RegisterDataModal: React.FC<RegisterDataModalProps> = ({
           volumeType: '',
           location: effectiveLocation,
           connectionRef: effectiveConnection,
-          owner: owner.trim() || undefined,
-          tags: {},
+          tags: selectedTags.filter((t) => t !== '__new_tag__'),
           isVolume: false,
           schemaFields: schemaFields.length > 0 ? schemaFields : undefined,
           properties: Object.keys(properties).length > 0 ? properties : undefined,
@@ -179,7 +184,7 @@ const RegisterDataModal: React.FC<RegisterDataModalProps> = ({
           volumeType: 'EXTERNAL',
           location: effectiveLocation,
           connectionRef: effectiveConnection,
-          tags: {},
+          tags: selectedTags.filter((t) => t !== '__new_tag__'),
           isVolume: true,
           properties: Object.keys(properties).length > 0 ? properties : undefined,
         });
@@ -246,15 +251,6 @@ const RegisterDataModal: React.FC<RegisterDataModalProps> = ({
               onChange={(_event, val) => setDescription(val)}
               resizeOrientation="vertical"
               rows={3}
-            />
-          </FormGroup>
-
-          <FormGroup label="Owner" fieldId="data-owner">
-            <TextInput
-              id="data-owner"
-              value={owner}
-              onChange={(_event, val) => setOwner(val)}
-              placeholder="e.g. data-team, underwriting-ops"
             />
           </FormGroup>
 
@@ -333,6 +329,95 @@ const RegisterDataModal: React.FC<RegisterDataModalProps> = ({
                 aria-label="New collection name"
               />
               </FormGroup>
+            )}
+          </FormGroup>
+
+          <FormGroup label="Tags" fieldId="data-tags">
+            <Select
+              id="data-tags"
+              role="menu"
+              isOpen={isTagOpen}
+              onSelect={(_event, value) => {
+                const val = String(value);
+                setSelectedTags((prev) =>
+                  prev.includes(val) ? prev.filter((v) => v !== val) : [...prev, val],
+                );
+              }}
+              onOpenChange={setIsTagOpen}
+              toggle={(toggleRef) => (
+                <MenuToggle
+                  ref={toggleRef}
+                  onClick={() => setIsTagOpen(!isTagOpen)}
+                  isExpanded={isTagOpen}
+                  isFullWidth
+                >
+                  {selectedTags.length === 0 ? 'Select tags' : `${selectedTags.length} tag${selectedTags.length > 1 ? 's' : ''} selected`}
+                </MenuToggle>
+              )}
+            >
+              <SelectList>
+                {availableTags.map((t) => (
+                  <SelectOption key={t} hasCheckbox value={t} isSelected={selectedTags.includes(t)}>{t}</SelectOption>
+                ))}
+              </SelectList>
+              {availableTags.length > 0 && <Divider />}
+              <SelectList>
+                <SelectOption value="__new_tag__">
+                  <Flex alignItems={{ default: 'alignItemsCenter' }} spaceItems={{ default: 'spaceItemsSm' }}>
+                    <FlexItem><PlusCircleIcon /></FlexItem>
+                    <FlexItem>Create new tag</FlexItem>
+                  </Flex>
+                </SelectOption>
+              </SelectList>
+            </Select>
+            {selectedTags.includes('__new_tag__') && (
+              <Flex alignItems={{ default: 'alignItemsCenter' }} spaceItems={{ default: 'spaceItemsSm' }} style={{ marginTop: 'var(--pf-t--global--spacer--sm)' }}>
+                <FlexItem grow={{ default: 'grow' }}>
+                  <TextInput
+                    id="new-tag-input"
+                    value={newTagValue}
+                    onChange={(_event, val) => setNewTagValue(val)}
+                    placeholder="Enter new tag name"
+                    aria-label="New tag name"
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && newTagValue.trim()) {
+                        e.preventDefault();
+                        setSelectedTags((prev) => [...prev.filter((t) => t !== '__new_tag__'), newTagValue.trim()]);
+                        setNewTagValue('');
+                      }
+                    }}
+                  />
+                </FlexItem>
+                <FlexItem>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    isDisabled={!newTagValue.trim()}
+                    onClick={() => {
+                      if (newTagValue.trim()) {
+                        setSelectedTags((prev) => [...prev.filter((t) => t !== '__new_tag__'), newTagValue.trim()]);
+                        setNewTagValue('');
+                      }
+                    }}
+                  >
+                    Add
+                  </Button>
+                </FlexItem>
+              </Flex>
+            )}
+            {selectedTags.filter((t) => t !== '__new_tag__').length > 0 && (
+              <LabelGroup style={{ marginTop: 'var(--pf-t--global--spacer--sm)' }}>
+                {selectedTags.filter((t) => t !== '__new_tag__').map((t) => (
+                  <Label
+                    key={t}
+                    isCompact
+                    color="blue"
+                    onClose={() => setSelectedTags((prev) => prev.filter((v) => v !== t))}
+                  >
+                    {t}
+                  </Label>
+                ))}
+              </LabelGroup>
             )}
           </FormGroup>
 
